@@ -8,6 +8,7 @@
 // groups).
 import { useMemo } from "react";
 import type { SettingsSection } from "@/features/settings";
+import { workspaceModeHasGitContext } from "@/lib/api";
 import { useAppShellState } from "@/shell/hooks/use-app-shell-state";
 import { AppShellLayout } from "./app-shell-layout";
 import { WorkspaceHeaderActions } from "./workspace-header-actions";
@@ -72,7 +73,9 @@ export function AppShell({
 					openPreferredEditorShortcut={chrome.openPreferredEditorShortcut}
 					rightSidebarToggleShortcut={chrome.rightSidebarToggleShortcut}
 					inspectorCollapsed={inspectorCollapsed}
-					isChatMode={data.selectedWorkspaceDetail?.mode === "chat"}
+					noGitContext={
+						!workspaceModeHasGitContext(data.selectedWorkspaceDetail?.mode)
+					}
 					onOpenPreferredEditor={chrome.handleOpenPreferredEditor}
 					onToggleInspector={() =>
 						setInspectorCollapsed((collapsed) => !collapsed)
@@ -132,6 +135,8 @@ export function AppShell({
 				onCollapseSidebar: () => panels.setSidebarCollapsed(true),
 				onOpenFeedback: () => s.setFeedbackOpen(true),
 				onOpenSettings: data.handleOpenSettings,
+				onOpenAutomations: () =>
+					sel.selectionActions.setViewMode("automations"),
 				pushWorkspaceToast: s.pushWorkspaceToast,
 			}}
 			sidebarCollapsed={panels.sidebarCollapsed}
@@ -179,6 +184,7 @@ export function AppShell({
 				activeEditor: data.activeEditorTarget,
 				preferredEditor: chrome.preferredEditor,
 				onOpenEditorFile: data.editorSessionActions.openFile,
+				onBrowseFiles: data.editorSessionActions.openExplorer,
 				onCommitAction: data.handleCommitAction,
 				onReviewAction: () =>
 					data.handleInspectorReviewAction({

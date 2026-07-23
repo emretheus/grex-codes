@@ -34,6 +34,14 @@ pub async fn list_workspace_files(
 }
 
 #[tauri::command]
+pub async fn list_directory(
+    workspace_root_path: String,
+    rel_path: String,
+) -> CmdResult<Vec<editor_files::DirEntry>> {
+    run_blocking(move || editor_files::list_directory(&workspace_root_path, &rel_path)).await
+}
+
+#[tauri::command]
 pub async fn list_workspace_changes(
     workspace_root_path: String,
     workspace_id: Option<String>,
@@ -104,9 +112,9 @@ pub async fn get_workspace_git_action_status(
         if !record.state.is_operational() {
             return Ok(quiet_status());
         }
-        // Chat workspaces are scratch dirs with no git binding at all. Polling
+        // Chat and non-git workspaces have no git binding at all. Polling
         // `git status` would just spam `WorkspaceBroken` on every tick.
-        if record.mode.is_chat() {
+        if !record.mode.has_git_context() {
             return Ok(quiet_status());
         }
         let workspace_dir = crate::workspace::helpers::workspace_path(&record)?;

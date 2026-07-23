@@ -14,8 +14,7 @@ export type GroupTone =
 	| "review"
 	| "progress"
 	| "backlog"
-	| "canceled"
-	| "ai-tasks";
+	| "canceled";
 
 /**
  * Mirror of the Rust `WorkspaceState` enum (`src-tauri/src/workspace/state.rs`).
@@ -124,6 +123,9 @@ export type WorkspaceRow = {
 	 *  (its base). Absent/null for non-stacked rows. Drives sidebar stack
 	 *  grouping — the sidebar nests a stack's members under their tip. */
 	parentWorkspaceId?: string | null;
+	/** User-set display name. When present it overrides the auto-derived
+	 *  title (including the branch-humanized fallback for worktrees). */
+	customName?: string | null;
 };
 
 /** Per-row stacked-PR connector metadata, attached by the frontend
@@ -1858,6 +1860,209 @@ export async function prewarmSlashCommandsForRepo(
 	}
 }
 
+// ── Library: Prompts ────────────────────────────────────────────────────────
+// Reusable instructions managed in the Library and inserted into the composer.
+// Purely Grex-internal — these never touch any agent's native config.
+
+export type PromptTemplate = {
+	id: string;
+	title: string;
+	prompt: string;
+	sortIndex: number;
+	createdAt: string;
+	updatedAt: string;
+};
+
+/** List all Library prompts in display order. */
+export async function listLibraryPrompts(): Promise<PromptTemplate[]> {
+	return await invoke<PromptTemplate[]>("library_prompts_list");
+}
+
+/** Create (omit `id`) or update a Library prompt. Returns the stored row. */
+export async function upsertLibraryPrompt(input: {
+	id?: string | null;
+	title: string;
+	prompt: string;
+}): Promise<PromptTemplate> {
+	return await invoke<PromptTemplate>("library_prompts_upsert", {
+		id: input.id ?? null,
+		title: input.title,
+		prompt: input.prompt,
+	});
+}
+
+/** Delete a Library prompt by id. */
+export async function deleteLibraryPrompt(id: string): Promise<void> {
+	await invoke<void>("library_prompts_delete", { id });
+}
+
+/** Persist a new display order from the full list of prompt ids. */
+export async function reorderLibraryPrompts(
+	orderedIds: string[],
+): Promise<void> {
+	await invoke<void>("library_prompts_reorder", { orderedIds });
+}
+
+// ── Library: MCP servers ────────────────────────────────────────────────────
+// Stored canonically in Grex; an explicit "Sync to agents" writes them into
+// each selected agent's native config file.
+
+export type McpTransport = "stdio" | "http";
+
+export type McpServer = {
+	id: string;
+	name: string;
+	transport: McpTransport;
+	command?: string | null;
+	args: string[];
+	url?: string | null;
+	headers: Record<string, string>;
+	env: Record<string, string>;
+	/** Agent ids this server is synced to, e.g. `["claude", "codex"]`. */
+	providers: string[];
+	enabled: boolean;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type McpServerInput = {
+	id?: string | null;
+	name: string;
+	transport: McpTransport;
+	command?: string | null;
+	args: string[];
+	url?: string | null;
+	headers: Record<string, string>;
+	env: Record<string, string>;
+	providers: string[];
+	enabled: boolean;
+};
+
+/** What a sync will do to one agent's native config file. */
+export type McpAgentSyncChange = {
+	agent: string;
+	configPath: string;
+	written: string[];
+	removed: string[];
+	unsupported: string[];
+};
+
+export type McpSyncPlan = { changes: McpAgentSyncChange[] };
+
+/** List all Library MCP servers. */
+export async function listMcpServers(): Promise<McpServer[]> {
+	return await invoke<McpServer[]>("library_mcp_list");
+}
+
+/** Create (omit `id`) or update an MCP server. Does not write native config. */
+export async function upsertMcpServer(
+	server: McpServerInput,
+): Promise<McpServer> {
+	return await invoke<McpServer>("library_mcp_upsert", { server });
+}
+
+/** Delete an MCP server (and remove any synced copy from agent configs). */
+export async function deleteMcpServer(id: string): Promise<void> {
+	await invoke<void>("library_mcp_delete", { id });
+}
+
+/** Preview what "Sync to agents" would change, writing nothing. */
+export async function previewMcpSync(): Promise<McpSyncPlan> {
+	return await invoke<McpSyncPlan>("library_mcp_sync_preview");
+}
+
+/** Write every Library MCP server into the selected agents' native configs. */
+export async function syncMcpServers(): Promise<McpSyncPlan> {
+	return await invoke<McpSyncPlan>("library_mcp_sync");
+}
+
+/** Result of an MCP "Test connection" (initialize + tools/list handshake). */
+export type McpTestResult = {
+	ok: boolean;
+	serverName?: string | null;
+	toolCount?: number | null;
+	error?: string | null;
+};
+
+/** Test-connect an (unsaved) MCP server config. */
+export async function testMcpServer(
+	server: McpServerInput,
+): Promise<McpTestResult> {
+	return await invoke<McpTestResult>("library_mcp_test", { server });
+}
+
+// ── Library: Skills ─────────────────────────────────────────────────────────
+// SKILL.md modules installed to ~/.agentskills/<name> and symlinked into each
+// agent's skills dir.
+
+export type SkillSummary = {
+	name: string;
+	description: string;
+	/** True when Grex owns the skill (in ~/.agentskills) and can edit/delete it. */
+	managed: boolean;
+};
+export type SkillDetail = {
+	name: string;
+	description: string;
+	/** Full SKILL.md content. */
+	content: string;
+	managed: boolean;
+};
+
+/** List installed Library skills. */
+export async function listSkills(): Promise<SkillSummary[]> {
+	return await invoke<SkillSummary[]>("library_skills_list");
+}
+
+/** Read a single skill's SKILL.md. */
+export async function readSkill(name: string): Promise<SkillDetail | null> {
+	return await invoke<SkillDetail | null>("library_skills_read", { name });
+}
+
+/** Create a skill and link it into every agent's skills dir. */
+export async function createSkill(input: {
+	name: string;
+	description: string;
+	content?: string | null;
+}): Promise<SkillSummary> {
+	return await invoke<SkillSummary>("library_skills_create", {
+		name: input.name,
+		description: input.description,
+		content: input.content ?? null,
+	});
+}
+
+/**
+ * Install a recommended skill. When `sourceUrl` is set, the real upstream
+ * SKILL.md is fetched server-side, falling back to `content` on any failure.
+ */
+export async function installSkill(input: {
+	name: string;
+	description: string;
+	content: string;
+	sourceUrl?: string | null;
+}): Promise<SkillSummary> {
+	return await invoke<SkillSummary>("library_skills_install", {
+		name: input.name,
+		description: input.description,
+		content: input.content,
+		sourceUrl: input.sourceUrl ?? null,
+	});
+}
+
+/** Overwrite a skill's SKILL.md. */
+export async function updateSkill(
+	name: string,
+	content: string,
+): Promise<void> {
+	await invoke<void>("library_skills_update", { name, content });
+}
+
+/** Delete a skill and unlink it from every agent's skills dir. */
+export async function deleteSkill(name: string): Promise<void> {
+	await invoke<void>("library_skills_delete", { name });
+}
+
 export async function loadWorkspaceDetail(
 	workspaceId: string,
 ): Promise<WorkspaceDetail | null> {
@@ -1985,8 +2190,21 @@ export async function moveLocalWorkspaceToWorktree(
  * - `local`: operates directly on the source repo's root path.
  * - `chat`: a scratch dir under `<data_dir>/chats/<YYYY-MM-DD>/<name>`
  *   with no git context. "Just Chat" mode from the start page.
+ * - `non_git`: a user-picked plain directory that isn't a git repo.
+ *   Operates in place like `local` but has no git context like `chat`.
  */
-export type WorkspaceMode = "worktree" | "local" | "chat";
+export type WorkspaceMode = "worktree" | "local" | "chat" | "non_git";
+
+/** True for git-backed modes (branch / diff / inspector apply). `chat`
+ *  and `non_git` are the "no git context" modes — gate git-only UI
+ *  (3rd-column inspector, branch pickers) on this, not on `mode === "chat"`.
+ *  Unknown/loading mode defaults to git-backed (matches the prior
+ *  `!== "chat"` gate); only the explicit no-git modes return false. */
+export function workspaceModeHasGitContext(
+	mode: WorkspaceMode | null | undefined,
+): boolean {
+	return mode !== "chat" && mode !== "non_git";
+}
 
 /** `from_branch`: fork off the picked base. `use_branch`: attach to it. */
 export type WorkspaceBranchIntent = "from_branch" | "use_branch";
@@ -2388,12 +2606,21 @@ export async function slackListEmoji(
 // go through Linear's GraphQL API in `src-tauri/src/linear/api.rs`.
 // ---------------------------------------------------------------------------
 
-/** Linear connection state. `connected` is the single source of truth the
- *  UI branches on; the name fields drive the connected-state copy. */
+/** Which slice of a workspace's issues the feed pulls. */
+export type LinearScope = "assigned" | "all";
+
+/** One connected Linear workspace. The presence of ≥1 connection in the
+ *  list returned by `linearConnections` is the "connected" signal the UI
+ *  branches on; `scope` + filter ids drive the per-workspace controls. */
 export type LinearConnection = {
-	connected: boolean;
+	/** Connection id (also the keychain account; equals the org id for new
+	 *  connections, `"api-key"` for migrated legacy installs). */
+	id: string;
 	workspaceName?: string | null;
 	userName?: string | null;
+	scope: LinearScope;
+	teamIds: string[];
+	projectIds: string[];
 };
 
 export type LinearProjectRef = {
@@ -2406,44 +2633,136 @@ export type LinearLabelRef = {
 	color: string;
 };
 
-/** One Linear issue projected into a context-card-shaped row. */
-export type LinearInboxItem = {
+/** A Linear team, for the settings team picker. */
+export type LinearTeam = {
 	id: string;
+	name: string;
+	key: string;
+};
+
+/** A Linear project, for the settings project picker. */
+export type LinearProject = {
+	id: string;
+	name: string;
+	color: string;
+};
+
+// ---------------------------------------------------------------------------
+// Provider-agnostic issue feed (Linear / Jira / Trello).
+//
+// Mirrors `src-tauri/src/issues/types.rs`. The merged feed returns
+// `InboxItem`s whose `meta` is discriminated by `type` — the same shape the
+// frontend `ContextCardMeta` union mirrors. One mapper
+// (`issueItemToContextCard`) turns these into `ContextCard`s for every
+// provider.
+// ---------------------------------------------------------------------------
+
+export type IssueProviderKind =
+	| "linear"
+	| "jira"
+	| "trello"
+	| "forgejo"
+	| "featurebase"
+	| "plain";
+
+export type IssueItemState = { label: string; tone: string };
+
+export type LinearItemMeta = {
+	type: "linear";
 	identifier: string;
-	title: string;
-	url: string;
-	stateName: string;
-	/** `triage | backlog | unstarted | started | completed | canceled`. */
-	stateType: string;
-	priority: number;
 	priorityLabel: string;
-	teamName: string;
-	teamKey: string;
+	team: { name: string; key: string };
 	project?: LinearProjectRef | null;
 	labels: LinearLabelRef[];
+};
+
+export type JiraItemMeta = {
+	type: "jira";
+	siteName?: string | null;
+	issueType: string;
+	priority?: string | null;
+	projectName: string;
+	labels: string[];
+};
+
+export type TrelloItemMeta = {
+	type: "trello";
+	boardName: string;
+	listName: string;
+	labels: { name: string; color: string }[];
+};
+
+export type ForgejoItemMeta = {
+	type: "forgejo";
+	hostName?: string | null;
+	repo: string;
+	number: number;
+	labels: { name: string; color: string }[];
+};
+
+export type FeaturebaseItemMeta = {
+	type: "featurebase";
+	orgName?: string | null;
+	board: string;
+	upvotes: number;
+};
+
+export type PlainItemMeta = {
+	type: "plain";
+	workspaceName?: string | null;
+	customerName: string;
+	priority?: string | null;
+};
+
+export type IssueItemMeta =
+	| LinearItemMeta
+	| JiraItemMeta
+	| TrelloItemMeta
+	| ForgejoItemMeta
+	| FeaturebaseItemMeta
+	| PlainItemMeta;
+
+/** One issue/task projected into a context-card-shaped row. */
+export type IssueInboxItem = {
+	id: string;
+	/** Which connected account produced this item. */
+	connectionId: string;
+	provider: IssueProviderKind;
+	title: string;
+	/** Human identifier: Linear `ENG-123`, Jira `PROJ-45`, Trello short link. */
+	externalId: string;
+	url: string;
+	state: IssueItemState;
 	lastActivityAt: number;
 	assigneeName?: string | null;
+	meta: IssueItemMeta;
 };
 
-export type LinearInboxPage = {
-	items: LinearInboxItem[];
-	nextCursor?: string | null;
+export type IssueInboxPage = {
+	items: IssueInboxItem[];
+	/** connectionId → opaque cursor for that connection's NEXT page. Absent
+	 *  = exhausted; empty object = end of the merged feed. Passed back
+	 *  verbatim to fetch the next page. */
+	cursors: Record<string, string>;
 };
 
-/** Read the current Linear connection state (does NOT prompt for a key). */
-export async function linearConnectionStatus(): Promise<LinearConnection> {
+/** Full issue detail for the preview panel: `IssueInboxItem` + markdown body. */
+export type IssueDetail = IssueInboxItem & { description?: string | null };
+
+/** Read the connected Linear workspaces (does NOT prompt for a key). */
+export async function linearConnections(): Promise<LinearConnection[]> {
 	try {
-		return await invoke<LinearConnection>("linear_connection_status");
+		return await invoke<LinearConnection[]>("linear_connections");
 	} catch (error) {
 		throw new Error(
-			describeInvokeError(error, "Couldn't read Linear connection state."),
+			describeInvokeError(error, "Couldn't read Linear connections."),
 		);
 	}
 }
 
 /** Validate + store a personal API key (created at
  *  linear.app/settings/api). Rejects without persisting if the key is
- *  invalid. */
+ *  invalid. Reconnecting the same org refreshes it in place. */
 export async function linearConnect(apiKey: string): Promise<LinearConnection> {
 	try {
 		return await invoke<LinearConnection>("linear_connect", { apiKey });
@@ -2452,21 +2771,71 @@ export async function linearConnect(apiKey: string): Promise<LinearConnection> {
 	}
 }
 
-export async function linearDisconnect(): Promise<void> {
+/** Disconnect one workspace by connection id. */
+export async function linearDisconnect(connectionId: string): Promise<void> {
 	try {
-		await invoke<void>("linear_disconnect");
+		await invoke<void>("linear_disconnect", { connectionId });
 	} catch (error) {
 		throw new Error(describeInvokeError(error, "Couldn't disconnect Linear."));
 	}
 }
 
-export async function linearListInboxItems(args: {
-	cursor?: string | null;
-	limit?: number;
-}): Promise<LinearInboxPage> {
+/** Update a workspace's feed scope + team/project filters. */
+export async function linearUpdateScope(args: {
+	connectionId: string;
+	scope: LinearScope;
+	teamIds: string[];
+	projectIds: string[];
+}): Promise<LinearConnection> {
 	try {
-		return await invoke<LinearInboxPage>("linear_list_inbox_items", {
-			cursor: args.cursor ?? null,
+		return await invoke<LinearConnection>("linear_update_scope", {
+			connectionId: args.connectionId,
+			scope: args.scope,
+			teamIds: args.teamIds,
+			projectIds: args.projectIds,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't update Linear settings."),
+		);
+	}
+}
+
+/** Teams the workspace's key can see, for the settings team picker. */
+export async function linearListTeams(
+	connectionId: string,
+): Promise<LinearTeam[]> {
+	try {
+		return await invoke<LinearTeam[]>("linear_list_teams", { connectionId });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Linear teams."));
+	}
+}
+
+/** Projects the workspace's key can see, optionally scoped to one team. */
+export async function linearListProjects(args: {
+	connectionId: string;
+	teamId?: string | null;
+}): Promise<LinearProject[]> {
+	try {
+		return await invoke<LinearProject[]>("linear_list_projects", {
+			connectionId: args.connectionId,
+			teamId: args.teamId ?? null,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't load Linear projects."),
+		);
+	}
+}
+
+export async function linearListInboxItems(args: {
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("linear_list_inbox_items", {
+			cursors: args.cursors ?? null,
 			limit: args.limit ?? 30,
 		});
 	} catch (error) {
@@ -2476,13 +2845,13 @@ export async function linearListInboxItems(args: {
 
 export async function linearSearchIssues(args: {
 	query: string;
-	cursor?: string | null;
+	cursors?: Record<string, string> | null;
 	limit?: number;
-}): Promise<LinearInboxPage> {
+}): Promise<IssueInboxPage> {
 	try {
-		return await invoke<LinearInboxPage>("linear_search_issues", {
+		return await invoke<IssueInboxPage>("linear_search_issues", {
 			query: args.query,
-			cursor: args.cursor ?? null,
+			cursors: args.cursors ?? null,
 			limit: args.limit ?? 30,
 		});
 	} catch (error) {
@@ -2492,34 +2861,547 @@ export async function linearSearchIssues(args: {
 	}
 }
 
-/** Full issue detail for the preview panel + "Start workspace" prompt.
- *  Superset of `LinearInboxItem` adding the markdown `description`. */
-export type LinearIssueDetail = {
-	id: string;
-	identifier: string;
-	title: string;
-	description?: string | null;
-	url: string;
-	stateName: string;
-	stateType: string;
-	priority: number;
-	priorityLabel: string;
-	teamName: string;
-	teamKey: string;
-	project?: LinearProjectRef | null;
-	labels: LinearLabelRef[];
-	assigneeName?: string | null;
-	lastActivityAt: number;
-};
-
-/** Fetch one Linear issue by id (the card's `id`), including its body. */
-export async function linearGetIssue(
-	issueId: string,
-): Promise<LinearIssueDetail> {
+/** Fetch one Linear issue, including its body, from a specific workspace. */
+export async function linearGetIssue(args: {
+	connectionId: string;
+	issueId: string;
+}): Promise<IssueDetail> {
 	try {
-		return await invoke<LinearIssueDetail>("linear_get_issue", { issueId });
+		return await invoke<IssueDetail>("linear_get_issue", {
+			connectionId: args.connectionId,
+			issueId: args.issueId,
+		});
 	} catch (error) {
 		throw new Error(describeInvokeError(error, "Couldn't load Linear issue."));
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Jira context source. Mirrors `src-tauri/src/commands/jira_commands.rs`.
+// Auth = site URL + email + Atlassian API token.
+// ---------------------------------------------------------------------------
+
+export type JiraConnection = {
+	id: string;
+	siteName: string;
+	userName: string;
+	assignedOnly: boolean;
+	projectKeys: string[];
+};
+
+export type JiraProject = { id: string; key: string; name: string };
+
+export async function jiraConnections(): Promise<JiraConnection[]> {
+	try {
+		return await invoke<JiraConnection[]>("jira_connections");
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't read Jira connections."),
+		);
+	}
+}
+
+export async function jiraConnect(args: {
+	site: string;
+	email: string;
+	token: string;
+}): Promise<JiraConnection> {
+	try {
+		return await invoke<JiraConnection>("jira_connect", {
+			site: args.site,
+			email: args.email,
+			token: args.token,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't connect Jira."));
+	}
+}
+
+export async function jiraDisconnect(connectionId: string): Promise<void> {
+	try {
+		await invoke<void>("jira_disconnect", { connectionId });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't disconnect Jira."));
+	}
+}
+
+export async function jiraUpdateScope(args: {
+	connectionId: string;
+	assignedOnly: boolean;
+	projectKeys: string[];
+}): Promise<JiraConnection> {
+	try {
+		return await invoke<JiraConnection>("jira_update_scope", {
+			connectionId: args.connectionId,
+			assignedOnly: args.assignedOnly,
+			projectKeys: args.projectKeys,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't update Jira settings."),
+		);
+	}
+}
+
+export async function jiraListProjects(
+	connectionId: string,
+): Promise<JiraProject[]> {
+	try {
+		return await invoke<JiraProject[]>("jira_list_projects", { connectionId });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Jira projects."));
+	}
+}
+
+export async function jiraListInboxItems(args: {
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("jira_list_inbox_items", {
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Jira issues."));
+	}
+}
+
+export async function jiraSearchIssues(args: {
+	query: string;
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("jira_search_issues", {
+			query: args.query,
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't search Jira issues."));
+	}
+}
+
+export async function jiraGetIssue(args: {
+	connectionId: string;
+	issueId: string;
+}): Promise<IssueDetail> {
+	try {
+		return await invoke<IssueDetail>("jira_get_issue", {
+			connectionId: args.connectionId,
+			issueId: args.issueId,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Jira issue."));
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Trello context source. Mirrors `src-tauri/src/commands/trello_commands.rs`.
+// Auth = API key + token.
+// ---------------------------------------------------------------------------
+
+export type TrelloConnection = {
+	id: string;
+	memberName: string;
+	assignedOnly: boolean;
+	boardIds: string[];
+};
+
+export type TrelloBoard = { id: string; name: string };
+
+export async function trelloConnections(): Promise<TrelloConnection[]> {
+	try {
+		return await invoke<TrelloConnection[]>("trello_connections");
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't read Trello connections."),
+		);
+	}
+}
+
+export async function trelloConnect(args: {
+	apiKey: string;
+	token: string;
+}): Promise<TrelloConnection> {
+	try {
+		return await invoke<TrelloConnection>("trello_connect", {
+			apiKey: args.apiKey,
+			token: args.token,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't connect Trello."));
+	}
+}
+
+export async function trelloDisconnect(connectionId: string): Promise<void> {
+	try {
+		await invoke<void>("trello_disconnect", { connectionId });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't disconnect Trello."));
+	}
+}
+
+export async function trelloUpdateScope(args: {
+	connectionId: string;
+	assignedOnly: boolean;
+	boardIds: string[];
+}): Promise<TrelloConnection> {
+	try {
+		return await invoke<TrelloConnection>("trello_update_scope", {
+			connectionId: args.connectionId,
+			assignedOnly: args.assignedOnly,
+			boardIds: args.boardIds,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't update Trello settings."),
+		);
+	}
+}
+
+export async function trelloListBoards(
+	connectionId: string,
+): Promise<TrelloBoard[]> {
+	try {
+		return await invoke<TrelloBoard[]>("trello_list_boards", { connectionId });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Trello boards."));
+	}
+}
+
+export async function trelloListInboxItems(args: {
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("trello_list_inbox_items", {
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Trello cards."));
+	}
+}
+
+export async function trelloSearchIssues(args: {
+	query: string;
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("trello_search_issues", {
+			query: args.query,
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't search Trello cards."),
+		);
+	}
+}
+
+export async function trelloGetIssue(args: {
+	connectionId: string;
+	issueId: string;
+}): Promise<IssueDetail> {
+	try {
+		return await invoke<IssueDetail>("trello_get_issue", {
+			connectionId: args.connectionId,
+			issueId: args.issueId,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Trello card."));
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Forgejo context source. Mirrors `src-tauri/src/commands/forgejo_commands.rs`.
+// ---------------------------------------------------------------------------
+
+export type ForgejoConnection = {
+	id: string;
+	hostName: string;
+	userName: string;
+	assignedOnly: boolean;
+};
+
+export async function forgejoConnections(): Promise<ForgejoConnection[]> {
+	try {
+		return await invoke<ForgejoConnection[]>("forgejo_connections");
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't read Forgejo connections."),
+		);
+	}
+}
+
+export async function forgejoConnect(args: {
+	host: string;
+	token: string;
+}): Promise<ForgejoConnection> {
+	try {
+		return await invoke<ForgejoConnection>("forgejo_connect", {
+			host: args.host,
+			token: args.token,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't connect Forgejo."));
+	}
+}
+
+export async function forgejoDisconnect(connectionId: string): Promise<void> {
+	try {
+		await invoke<void>("forgejo_disconnect", { connectionId });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't disconnect Forgejo."));
+	}
+}
+
+export async function forgejoUpdateScope(args: {
+	connectionId: string;
+	assignedOnly: boolean;
+}): Promise<ForgejoConnection> {
+	try {
+		return await invoke<ForgejoConnection>("forgejo_update_scope", {
+			connectionId: args.connectionId,
+			assignedOnly: args.assignedOnly,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't update Forgejo settings."),
+		);
+	}
+}
+
+export async function forgejoListInboxItems(args: {
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("forgejo_list_inbox_items", {
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't load Forgejo issues."),
+		);
+	}
+}
+
+export async function forgejoSearchIssues(args: {
+	query: string;
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("forgejo_search_issues", {
+			query: args.query,
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't search Forgejo issues."),
+		);
+	}
+}
+
+export async function forgejoGetIssue(args: {
+	connectionId: string;
+	issueId: string;
+}): Promise<IssueDetail> {
+	try {
+		return await invoke<IssueDetail>("forgejo_get_issue", {
+			connectionId: args.connectionId,
+			issueId: args.issueId,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Forgejo issue."));
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Featurebase context source.
+// Mirrors `src-tauri/src/commands/featurebase_commands.rs`.
+// ---------------------------------------------------------------------------
+
+export type FeaturebaseConnection = {
+	id: string;
+	orgName: string;
+};
+
+export async function featurebaseConnections(): Promise<
+	FeaturebaseConnection[]
+> {
+	try {
+		return await invoke<FeaturebaseConnection[]>("featurebase_connections");
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't read Featurebase connections."),
+		);
+	}
+}
+
+export async function featurebaseConnect(args: {
+	apiKey: string;
+	orgUrl: string;
+}): Promise<FeaturebaseConnection> {
+	try {
+		return await invoke<FeaturebaseConnection>("featurebase_connect", {
+			apiKey: args.apiKey,
+			orgUrl: args.orgUrl,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't connect Featurebase."),
+		);
+	}
+}
+
+export async function featurebaseDisconnect(
+	connectionId: string,
+): Promise<void> {
+	try {
+		await invoke<void>("featurebase_disconnect", { connectionId });
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't disconnect Featurebase."),
+		);
+	}
+}
+
+export async function featurebaseListInboxItems(args: {
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("featurebase_list_inbox_items", {
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't load Featurebase posts."),
+		);
+	}
+}
+
+export async function featurebaseSearchIssues(args: {
+	query: string;
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("featurebase_search_issues", {
+			query: args.query,
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't search Featurebase posts."),
+		);
+	}
+}
+
+export async function featurebaseGetIssue(args: {
+	connectionId: string;
+	issueId: string;
+}): Promise<IssueDetail> {
+	try {
+		return await invoke<IssueDetail>("featurebase_get_issue", {
+			connectionId: args.connectionId,
+			issueId: args.issueId,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't load Featurebase post."),
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plain context source. Mirrors `src-tauri/src/commands/plain_commands.rs`.
+// ---------------------------------------------------------------------------
+
+export type PlainConnection = {
+	id: string;
+	workspaceName: string;
+};
+
+export async function plainConnections(): Promise<PlainConnection[]> {
+	try {
+		return await invoke<PlainConnection[]>("plain_connections");
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't read Plain connections."),
+		);
+	}
+}
+
+export async function plainConnect(apiKey: string): Promise<PlainConnection> {
+	try {
+		return await invoke<PlainConnection>("plain_connect", { apiKey });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't connect Plain."));
+	}
+}
+
+export async function plainDisconnect(connectionId: string): Promise<void> {
+	try {
+		await invoke<void>("plain_disconnect", { connectionId });
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't disconnect Plain."));
+	}
+}
+
+export async function plainListInboxItems(args: {
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("plain_list_inbox_items", {
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Plain threads."));
+	}
+}
+
+export async function plainSearchIssues(args: {
+	query: string;
+	cursors?: Record<string, string> | null;
+	limit?: number;
+}): Promise<IssueInboxPage> {
+	try {
+		return await invoke<IssueInboxPage>("plain_search_issues", {
+			query: args.query,
+			cursors: args.cursors ?? null,
+			limit: args.limit ?? 30,
+		});
+	} catch (error) {
+		throw new Error(
+			describeInvokeError(error, "Couldn't search Plain threads."),
+		);
+	}
+}
+
+export async function plainGetIssue(args: {
+	connectionId: string;
+	issueId: string;
+}): Promise<IssueDetail> {
+	try {
+		return await invoke<IssueDetail>("plain_get_issue", {
+			connectionId: args.connectionId,
+			issueId: args.issueId,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Couldn't load Plain thread."));
 	}
 }
 
@@ -2551,12 +3433,13 @@ export type UiMutationEvent =
 	| { type: "activeStreamsChanged" }
 	| { type: "slackWorkspacesChanged" }
 	| { type: "slackTokenInvalidated"; teamId: string }
-	| { type: "linearConnectionChanged" }
-	| { type: "triageConfigChanged" }
-	| { type: "triageActiveStatusChanged" }
-	| { type: "triageWorkspaceCreated"; workspaceId: string }
+	| { type: "issueConnectionChanged"; provider: IssueProviderKind }
 	| { type: "fastModeUnavailable"; sessionId: string; reason: string }
 	| { type: "pairedDevicesChanged" }
+	| { type: "automationsChanged" }
+	| { type: "libraryPromptsChanged" }
+	| { type: "libraryMcpServersChanged" }
+	| { type: "librarySkillsChanged" }
 	| { type: "terminalSessionIdle"; sessionId: string; workspaceId: string }
 	| {
 			type: "terminalPromptCaptured";
@@ -2569,253 +3452,6 @@ export type UiMutationEvent =
 			workspaceId: string;
 			sessionId: string | null;
 	  };
-
-export type TriageConfig = {
-	enabled: boolean;
-	/** False = scheduler doesn't auto-fire; Run-now still works. */
-	autoRun: boolean;
-	systemPrompt: string;
-	maxPerTick: number;
-};
-
-export type TriageCandidateRow = {
-	id: string;
-	source: string;
-	sourceKind: string;
-	sourceRef: string;
-	sourceParent: string | null;
-	sourceTime: string;
-	sender: string | null;
-	title: string | null;
-	preview: string | null;
-	externalUrl: string | null;
-	payloadPath: string;
-	payloadBytes: number;
-	decision: string | null;
-};
-
-export async function listOpenTriageCandidates(
-	limit = 20,
-): Promise<TriageCandidateRow[]> {
-	try {
-		return await invoke<TriageCandidateRow[]>("list_open_triage_candidates", {
-			limit,
-		});
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to load triage candidates."),
-		);
-	}
-}
-
-export async function countOpenTriageCandidates(): Promise<number> {
-	try {
-		return await invoke<number>("count_open_triage_candidates");
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to count triage candidates."),
-		);
-	}
-}
-
-export async function readTriageCandidate(
-	candidateId: string,
-	grep?: string,
-): Promise<string> {
-	try {
-		return await invoke<string>("read_triage_candidate", {
-			candidateId,
-			grep,
-		});
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to read triage candidate."),
-		);
-	}
-}
-
-export async function recordTriageDecision(
-	candidateId: string,
-	decision: string,
-	reason?: string,
-): Promise<void> {
-	try {
-		await invoke<void>("record_triage_decision", {
-			candidateId,
-			decision,
-			reason,
-		});
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to record triage decision."),
-		);
-	}
-}
-
-export type TriageSourceHealthState =
-	| "ok"
-	| "notInstalled"
-	| "notAuthed"
-	| "notConfigured"
-	| "degraded";
-
-export type TriageSourceHealth = {
-	source: string;
-	displayName: string;
-	state: TriageSourceHealthState;
-	detail: string;
-};
-
-export async function getTriageSourceHealth(): Promise<TriageSourceHealth[]> {
-	try {
-		return await invoke<TriageSourceHealth[]>("get_triage_source_health");
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to load triage source health."),
-		);
-	}
-}
-
-export type LarkAuthAction = "install" | "signIn";
-
-export async function spawnLarkCliAuthTerminal(
-	action: LarkAuthAction,
-	instanceId: string,
-	onEvent: (event: ScriptEvent) => void,
-): Promise<void> {
-	const channel = new Channel<ScriptEvent>();
-	channel.onmessage = onEvent;
-	await invoke("spawn_lark_cli_auth_terminal", {
-		action,
-		instanceId,
-		channel,
-	});
-}
-
-export async function stopLarkCliAuthTerminal(
-	action: LarkAuthAction,
-	instanceId: string,
-): Promise<boolean> {
-	return invoke<boolean>("stop_lark_cli_auth_terminal", {
-		action,
-		instanceId,
-	});
-}
-
-export async function writeLarkCliAuthTerminalStdin(
-	action: LarkAuthAction,
-	instanceId: string,
-	data: string,
-): Promise<boolean> {
-	return invoke<boolean>("write_lark_cli_auth_terminal_stdin", {
-		action,
-		instanceId,
-		data,
-	});
-}
-
-export async function resizeLarkCliAuthTerminal(
-	action: LarkAuthAction,
-	instanceId: string,
-	cols: number,
-	rows: number,
-): Promise<boolean> {
-	return invoke<boolean>("resize_lark_cli_auth_terminal", {
-		action,
-		instanceId,
-		cols,
-		rows,
-	});
-}
-
-export type TriageToolCallRecord = {
-	at: string;
-	tool: string;
-	argsPreview: string;
-};
-
-export type TriageActiveStatus = {
-	tickId: string;
-	startedAt: string;
-	turnCount: number;
-	toolCount: number;
-	lastToolName: string | null;
-	lastUpdateAt: string;
-	recentToolCalls: TriageToolCallRecord[];
-	/** 1-indexed current batch; 0 = haven't started a batch yet. */
-	batchIndex: number;
-	/** Upper bound on batches this tick will run. */
-	batchTotal: number;
-};
-
-export type TickOutcome =
-	| { kind: "createdWorkspaces"; count: number }
-	| { kind: "noActionableItems" }
-	| { kind: "cancelled" }
-	| { kind: "failed"; message: string };
-
-export type LastTickOutcome = {
-	at: string;
-	tickId: string;
-	outcome: TickOutcome;
-	/** Agent's final assistant text, when present. */
-	summary: string | null;
-};
-
-export type TriageStatus = {
-	active: TriageActiveStatus | null;
-	lastOutcome: LastTickOutcome | null;
-};
-
-export async function getTriageConfig(): Promise<TriageConfig> {
-	try {
-		return await invoke<TriageConfig>("get_triage_config");
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to load triage settings."),
-		);
-	}
-}
-
-export async function updateTriageConfig(config: TriageConfig): Promise<void> {
-	try {
-		await invoke<void>("update_triage_config", { config });
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to save triage settings."),
-		);
-	}
-}
-
-export async function getTriageActiveStatus(): Promise<TriageStatus> {
-	try {
-		return await invoke<TriageStatus>("get_triage_active_status");
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to load triage status."),
-		);
-	}
-}
-
-export async function triggerTriageTickNow(): Promise<string> {
-	try {
-		return await invoke<string>("trigger_triage_tick_now");
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to trigger triage tick."),
-		);
-	}
-}
-
-export async function cancelTriageTick(): Promise<boolean> {
-	try {
-		return await invoke<boolean>("cancel_triage_tick");
-	} catch (error) {
-		throw new Error(
-			describeInvokeError(error, "Unable to cancel triage tick."),
-		);
-	}
-}
 
 export async function listenGitBranchChanged(
 	callback: (payload: GitBranchChangedPayload) => void,
@@ -3132,6 +3768,34 @@ export async function listWorkspaceFiles(
 		throw new Error(
 			describeInvokeError(error, "Unable to list workspace files."),
 		);
+	}
+}
+
+/** One entry of a single directory level, for the lazy file-explorer tree.
+ *  `path` is workspace-root-relative with forward slashes (`src/lib`). */
+export type DirEntry = {
+	name: string;
+	path: string;
+	isDir: boolean;
+};
+
+/**
+ * List a single directory level for the file-explorer tree. `relPath` is
+ * workspace-root-relative (empty string = the workspace root). Folders come
+ * before files, each alphabetical; noise dirs (`.git`, `node_modules`, …),
+ * junk files, and symlinks are filtered out by the backend.
+ */
+export async function listDirectory(
+	workspaceRootPath: string,
+	relPath: string,
+): Promise<DirEntry[]> {
+	try {
+		return await invoke<DirEntry[]>("list_directory", {
+			workspaceRootPath,
+			relPath,
+		});
+	} catch (error) {
+		throw new Error(describeInvokeError(error, "Unable to list directory."));
 	}
 }
 
@@ -3922,6 +4586,8 @@ export type ThreadMessageLike = {
 	content: ExtendedMessagePart[];
 	status?: { type: string; reason?: string };
 	streaming?: boolean;
+	/** Initiator of a user message: absent = human, "automation" = scheduler. */
+	source?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -4307,6 +4973,89 @@ export async function listActiveStreams(): Promise<ActiveStreamSummary[]> {
 	return await invoke<ActiveStreamSummary[]>("list_active_streams");
 }
 
+// ---------------------------------------------------------------------------
+// Automations — scheduled recurring prompts
+// ---------------------------------------------------------------------------
+
+export type AutomationSchedule =
+	| { kind: "hourly" }
+	| { kind: "daily"; time: string }
+	| { kind: "weekly"; weekday: number; time: string }
+	| { kind: "every"; amount: number; unit: "minutes" | "hours" };
+
+export type AutomationRunsIn = "chat" | "workspace";
+export type AutomationStatus = "active" | "paused";
+
+export type Automation = {
+	id: string;
+	title: string;
+	prompt: string;
+	runsIn: AutomationRunsIn;
+	sessionId: string | null;
+	workspaceId: string | null;
+	schedule: AutomationSchedule;
+	status: AutomationStatus;
+	nextRunAt: string;
+	lastRunAt: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type CreateAutomationRequest = {
+	title: string;
+	prompt: string;
+	runsIn: AutomationRunsIn;
+	sessionId?: string;
+	workspaceId?: string;
+	schedule: AutomationSchedule;
+};
+
+export type UpdateAutomationRequest = {
+	id: string;
+	title?: string;
+	prompt?: string;
+	runsIn?: AutomationRunsIn;
+	sessionId?: string;
+	workspaceId?: string;
+	schedule?: AutomationSchedule;
+};
+
+export async function listAutomations(): Promise<Automation[]> {
+	return await invoke<Automation[]>("list_automations");
+}
+
+export async function createAutomation(
+	request: CreateAutomationRequest,
+): Promise<Automation> {
+	return await invoke<Automation>("create_automation", { request });
+}
+
+export async function updateAutomation(
+	request: UpdateAutomationRequest,
+): Promise<Automation> {
+	return await invoke<Automation>("update_automation", { request });
+}
+
+export async function deleteAutomation(automationId: string): Promise<void> {
+	await invoke<void>("delete_automation", { automationId });
+}
+
+/** Pause/resume. Resume recomputes nextRunAt from now (no immediate fire). */
+export async function setAutomationStatus(
+	automationId: string,
+	status: AutomationStatus,
+): Promise<Automation> {
+	return await invoke<Automation>("set_automation_status", {
+		automationId,
+		status,
+	});
+}
+
+/** Dispatch immediately. Returns the session id the run landed in. */
+export async function runAutomationNow(automationId: string): Promise<string> {
+	return await invoke<string>("run_automation_now", { automationId });
+}
+
 export type AgentSteerRequest = {
 	sessionId: string;
 	provider?: string;
@@ -4502,6 +5251,15 @@ export async function renameWorkspaceBranch(
 	newBranch: string,
 ): Promise<void> {
 	await invoke("rename_workspace_branch", { workspaceId, newBranch });
+}
+
+/** Set the workspace's custom display name. A blank name clears the override
+ *  and restores the auto-derived title. */
+export async function renameWorkspace(
+	workspaceId: string,
+	name: string,
+): Promise<void> {
+	await invoke("rename_workspace", { workspaceId, name });
 }
 
 export type GenerateSessionTitleResponse = {

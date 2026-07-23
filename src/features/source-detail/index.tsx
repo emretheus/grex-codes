@@ -1,13 +1,18 @@
 import { memo } from "react";
 import type { ComposerInsertTarget } from "@/lib/composer-insert";
 import type { ContextCard } from "@/lib/sources/types";
+import { FeaturebasePostView } from "./featurebase/issue-view";
+import { ForgejoIssueView } from "./forgejo/issue-view";
 import { GitHubDiscussionView } from "./github/discussion-view";
 import { GitHubIssueView } from "./github/issue-view";
 import { GitHubPullRequestView } from "./github/pull-request-view";
 import { GitLabIssueView } from "./gitlab/issue-view";
 import { GitLabMergeRequestView } from "./gitlab/merge-request-view";
+import { JiraIssueView } from "./jira/issue-view";
 import { LinearIssueView } from "./linear/issue-view";
+import { PlainThreadView } from "./plain/issue-view";
 import { SlackThreadView } from "./slack/thread-view";
+import { TrelloCardView } from "./trello/issue-view";
 
 // `memo` keeps the markdown render in `GitHubDetailPage` from re-running
 // when the surrounding start page changes state. Once a card is open and the
@@ -68,6 +73,46 @@ export const SourceDetailView = memo(function SourceDetailView({
 		case "linear":
 			return (
 				<LinearIssueView
+					card={card}
+					appendContextTarget={appendContextTarget}
+					onStartWorkspace={onStartWorkspace}
+				/>
+			);
+		case "jira":
+			return (
+				<JiraIssueView
+					card={card}
+					appendContextTarget={appendContextTarget}
+					onStartWorkspace={onStartWorkspace}
+				/>
+			);
+		case "trello":
+			return (
+				<TrelloCardView
+					card={card}
+					appendContextTarget={appendContextTarget}
+					onStartWorkspace={onStartWorkspace}
+				/>
+			);
+		case "forgejo":
+			return (
+				<ForgejoIssueView
+					card={card}
+					appendContextTarget={appendContextTarget}
+					onStartWorkspace={onStartWorkspace}
+				/>
+			);
+		case "featurebase":
+			return (
+				<FeaturebasePostView
+					card={card}
+					appendContextTarget={appendContextTarget}
+					onStartWorkspace={onStartWorkspace}
+				/>
+			);
+		case "plain":
+			return (
+				<PlainThreadView
 					card={card}
 					appendContextTarget={appendContextTarget}
 					onStartWorkspace={onStartWorkspace}

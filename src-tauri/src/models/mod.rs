@@ -1,4 +1,7 @@
+pub mod automations;
 pub mod db;
+pub mod library_mcp;
+pub mod library_prompts;
 pub mod paired_devices;
 pub mod repos;
 pub mod session_inspection;

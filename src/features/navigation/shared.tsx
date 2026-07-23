@@ -3,7 +3,7 @@ import {
 	IssueDraftIcon,
 	XCircleFillIcon,
 } from "@primer/octicons-react";
-import { MessageCircle, Pin, Sparkles } from "lucide-react";
+import { MessageCircle, Pin } from "lucide-react";
 import type {
 	GroupTone,
 	WorkspaceGroup,
@@ -21,7 +21,6 @@ export const groupToneClasses: Record<GroupTone, string> = {
 	progress: "text-[var(--workspace-sidebar-status-progress)]",
 	backlog: "text-[var(--workspace-sidebar-status-backlog)]",
 	canceled: "text-[var(--workspace-sidebar-status-canceled)]",
-	"ai-tasks": "text-[var(--workspace-sidebar-status-triage)]",
 };
 
 export const branchToneClasses: Record<WorkspaceBranchTone, string> = {
@@ -35,14 +34,16 @@ export const branchToneClasses: Record<WorkspaceBranchTone, string> = {
 export const ARCHIVED_SECTION_ID = "__archived__";
 export const STATUS_OPTIONS: ReadonlyArray<{
 	value: WorkspaceStatus;
-	label: string;
+	/** Translation key under the `navigation` namespace (`status.*`).
+	 *  Resolved via `t()` at render so the label reacts to language switches. */
+	labelKey: string;
 	tone: GroupTone;
 }> = [
-	{ value: "backlog", label: "Backlog", tone: "backlog" },
-	{ value: "in-progress", label: "In progress", tone: "progress" },
-	{ value: "review", label: "In review", tone: "review" },
-	{ value: "done", label: "Done", tone: "done" },
-	{ value: "canceled", label: "Canceled", tone: "canceled" },
+	{ value: "backlog", labelKey: "status.backlog", tone: "backlog" },
+	{ value: "in-progress", labelKey: "status.inProgress", tone: "progress" },
+	{ value: "review", labelKey: "status.inReview", tone: "review" },
+	{ value: "done", labelKey: "status.done", tone: "done" },
+	{ value: "canceled", labelKey: "status.canceled", tone: "canceled" },
 ];
 
 export function humanizeBranch(branch: string): string {
@@ -128,8 +129,6 @@ export function GroupIcon({ tone }: { tone: GroupTone }) {
 			return (
 				<MessageCircle className={className} size={iconSize} strokeWidth={2} />
 			);
-		case "ai-tasks":
-			return <Sparkles className={className} size={iconSize} strokeWidth={2} />;
 	}
 }
 

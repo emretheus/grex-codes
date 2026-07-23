@@ -66,6 +66,7 @@ async fn dispatch(
             crate::commands::workspace_commands::create_and_checkout_branch(arg_string(&args, "repoId")?, arg_string(&args, "branch")?).await?;
             Ok(Value::Null)
         }
+        "create_automation" => to_value(crate::commands::automation_commands::create_automation(app.clone(), arg_json(&args, "request")?).await?),
         "create_repo_run_action" => to_value(crate::commands::script_commands::create_repo_run_action(app.clone(), arg_string(&args, "repoId")?, arg_string(&args, "name")?, arg_string(&args, "command")?, arg_string(&args, "mode")?, arg_opt_string(&args, "stopCommand")).await?),
         "create_session" => to_value(crate::commands::session_commands::create_session(arg_string(&args, "workspaceId")?, arg_opt_json(&args, "actionKind")?, arg_opt_string(&args, "permissionMode"), arg_opt_string(&args, "model"), arg_opt_string(&args, "effortLevel"), arg_opt_bool(&args, "fastMode"), arg_opt_string(&args, "seedSessionId"), arg_opt_string(&args, "sessionKind"), arg_opt_string(&args, "agentType")).await?),
         "create_workspace_from_repo" => to_value(crate::commands::workspace_commands::create_workspace_from_repo(app.clone(), arg_string(&args, "repoId")?).await?),
@@ -82,6 +83,10 @@ async fn dispatch(
             Ok(Value::Null)
         }
         "fetch_codex_provider_models" => to_value(crate::commands::provider_commands::fetch_codex_provider_models(arg_string(&args, "baseUrl")?, arg_string(&args, "apiKey")?).await?),
+        "delete_automation" => {
+            crate::commands::automation_commands::delete_automation(app.clone(), arg_string(&args, "automationId")?).await?;
+            Ok(Value::Null)
+        }
         "delete_query_cache" => {
             crate::commands::system_commands::delete_query_cache(arg_string(&args, "key")?).await?;
             Ok(Value::Null)
@@ -95,7 +100,7 @@ async fn dispatch(
             Ok(Value::Null)
         }
         "delete_session" => {
-            crate::commands::session_commands::delete_session(arg_string(&args, "sessionId")?).await?;
+            crate::commands::session_commands::delete_session(app.clone(), arg_string(&args, "sessionId")?).await?;
             Ok(Value::Null)
         }
         "detect_installed_editors" => to_value(crate::commands::editors::detect_installed_editors().await?),
@@ -140,11 +145,43 @@ async fn dispatch(
             crate::commands::forge_commands::invalidate_forge_caches(arg_json(&args, "provider")?, arg_opt_string(&args, "host")).await?;
             Ok(Value::Null)
         }
+        "library_mcp_delete" => {
+            crate::commands::library_commands::library_mcp_delete(app.clone(), arg_string(&args, "id")?).await?;
+            Ok(Value::Null)
+        }
+        "library_mcp_list" => to_value(crate::commands::library_commands::library_mcp_list().await?),
+        "library_mcp_sync" => to_value(crate::commands::library_commands::library_mcp_sync().await?),
+        "library_mcp_sync_preview" => to_value(crate::commands::library_commands::library_mcp_sync_preview().await?),
+        "library_mcp_test" => to_value(crate::commands::library_commands::library_mcp_test(arg_json(&args, "server")?).await?),
+        "library_mcp_upsert" => to_value(crate::commands::library_commands::library_mcp_upsert(app.clone(), arg_json(&args, "server")?).await?),
+        "library_prompts_delete" => {
+            crate::commands::library_commands::library_prompts_delete(app.clone(), arg_string(&args, "id")?).await?;
+            Ok(Value::Null)
+        }
+        "library_prompts_list" => to_value(crate::commands::library_commands::library_prompts_list().await?),
+        "library_prompts_reorder" => {
+            crate::commands::library_commands::library_prompts_reorder(app.clone(), arg_json(&args, "orderedIds")?).await?;
+            Ok(Value::Null)
+        }
+        "library_prompts_upsert" => to_value(crate::commands::library_commands::library_prompts_upsert(app.clone(), arg_opt_string(&args, "id"), arg_string(&args, "title")?, arg_string(&args, "prompt")?).await?),
+        "library_skills_create" => to_value(crate::commands::library_commands::library_skills_create(app.clone(), arg_string(&args, "name")?, arg_string(&args, "description")?, arg_opt_string(&args, "content")).await?),
+        "library_skills_delete" => {
+            crate::commands::library_commands::library_skills_delete(app.clone(), arg_string(&args, "name")?).await?;
+            Ok(Value::Null)
+        }
+        "library_skills_install" => to_value(crate::commands::library_commands::library_skills_install(app.clone(), arg_string(&args, "name")?, arg_string(&args, "description")?, arg_string(&args, "content")?, arg_opt_string(&args, "sourceUrl")).await?),
+        "library_skills_list" => to_value(crate::commands::library_commands::library_skills_list().await?),
+        "library_skills_read" => to_value(crate::commands::library_commands::library_skills_read(arg_string(&args, "name")?).await?),
+        "library_skills_update" => {
+            crate::commands::library_commands::library_skills_update(app.clone(), arg_string(&args, "name")?, arg_string(&args, "content")?).await?;
+            Ok(Value::Null)
+        }
         "list_active_streams" => to_value(crate::agents::list_active_streams(app.state::<crate::agents::ActiveStreams>()).await?),
         "list_agent_model_sections" => to_value(crate::agents::list_agent_model_sections().await?),
         "list_all_agent_model_sections" => to_value(crate::agents::list_all_agent_model_sections().await?),
         "list_codex_custom_providers" => to_value(crate::commands::provider_commands::list_codex_custom_providers().await?),
         "list_archived_workspaces" => to_value(crate::commands::workspace_commands::list_archived_workspaces().await?),
+        "list_automations" => to_value(crate::commands::automation_commands::list_automations().await?),
         "list_branches_for_local_picker" => to_value(crate::commands::workspace_commands::list_branches_for_local_picker(arg_string(&args, "repoId")?).await?),
         "list_branches_for_workspace_picker" => to_value(crate::commands::workspace_commands::list_branches_for_workspace_picker(arg_string(&args, "repoId")?).await?),
         "list_cursor_models" => to_value(crate::agents::list_cursor_models(app.state::<crate::sidecar::ManagedSidecar>(), arg_opt_string(&args, "apiKey")).await?),
@@ -167,6 +204,7 @@ async fn dispatch(
         "list_workspace_candidate_directories" => to_value(crate::commands::workspace_commands::list_workspace_candidate_directories(arg_opt_string(&args, "excludeWorkspaceId")).await?),
         "list_workspace_changes" => to_value(crate::commands::editor_commands::list_workspace_changes(arg_string(&args, "workspaceRootPath")?, arg_opt_string(&args, "workspaceId")).await?),
         "list_workspace_files" => to_value(crate::commands::editor_commands::list_workspace_files(arg_string(&args, "workspaceRootPath")?).await?),
+        "list_directory" => to_value(crate::commands::editor_commands::list_directory(arg_string(&args, "workspaceRootPath")?, arg_string(&args, "relPath")?).await?),
         "list_workspace_groups" => to_value(crate::commands::workspace_commands::list_workspace_groups().await?),
         "list_workspace_linked_directories" => to_value(crate::commands::workspace_commands::list_workspace_linked_directories(arg_string(&args, "workspaceId")?).await?),
         "list_workspace_sessions" => to_value(crate::commands::session_commands::list_workspace_sessions(arg_string(&args, "workspaceId")?).await?),
@@ -230,6 +268,10 @@ async fn dispatch(
             crate::commands::session_commands::rename_session(arg_string(&args, "sessionId")?, arg_string(&args, "title")?).await?;
             Ok(Value::Null)
         }
+        "rename_workspace" => {
+            crate::commands::workspace_commands::rename_workspace(app.clone(), arg_string(&args, "workspaceId")?, arg_string(&args, "name")?).await?;
+            Ok(Value::Null)
+        }
         "rename_workspace_branch" => {
             crate::commands::workspace_commands::rename_workspace_branch(app.clone(), arg_string(&args, "workspaceId")?, arg_string(&args, "newBranch")?).await?;
             Ok(Value::Null)
@@ -248,6 +290,7 @@ async fn dispatch(
         }
         "restore_workspace" => to_value(crate::commands::workspace_commands::restore_workspace(app.clone(), arg_string(&args, "workspaceId")?, arg_opt_string(&args, "targetBranchOverride")).await?),
         "retry_repo_forge_binding" => to_value(crate::commands::repository_commands::retry_repo_forge_binding(app.clone(), arg_string(&args, "repoId")?).await?),
+        "run_automation_now" => to_value(crate::commands::automation_commands::run_automation_now(app.clone(), arg_string(&args, "automationId")?).await?),
         "save_auto_close_action_kinds" => {
             crate::commands::settings_commands::save_auto_close_action_kinds(arg_json(&args, "kinds")?).await?;
             Ok(Value::Null)
@@ -261,6 +304,7 @@ async fn dispatch(
             crate::commands::system_commands::save_text_file_as(arg_string(&args, "path")?, arg_string(&args, "contents")?).await?;
             Ok(Value::Null)
         }
+        "set_automation_status" => to_value(crate::commands::automation_commands::set_automation_status(app.clone(), arg_string(&args, "automationId")?, arg_string(&args, "status")?).await?),
         "set_session_context_usage" => {
             crate::commands::session_commands::set_session_context_usage(app.clone(), arg_string(&args, "sessionId")?, arg_string(&args, "meta")?).await?;
             Ok(Value::Null)
@@ -338,6 +382,7 @@ async fn dispatch(
             crate::commands::settings_commands::update_app_settings(app.state::<crate::sidecar::ManagedSidecar>(), arg_json(&args, "settingsMap")?).await?;
             Ok(Value::Null)
         }
+        "update_automation" => to_value(crate::commands::automation_commands::update_automation(app.clone(), arg_json(&args, "request")?).await?),
         "update_intended_target_branch" => to_value(crate::commands::workspace_commands::update_intended_target_branch(app.clone(), arg_string(&args, "workspaceId")?, arg_string(&args, "targetBranch")?).await?),
         "update_repo_auto_run_setup" => {
             crate::commands::repository_commands::update_repo_auto_run_setup(arg_string(&args, "repoId")?, arg_bool(&args, "enabled")?).await?;
@@ -393,24 +438,19 @@ async fn dispatch(
             Ok(Value::Null)
         }
 
-        // ============ data domains: triage / slack / local-llm / feedback / conductor ============
+        // ============ data domains: slack / local-llm / feedback / conductor ============
         "activate_local_llm_model" => to_value(crate::commands::local_llm_commands::activate_local_llm_model(app.clone(), arg_string(&args, "entryId")?).await?),
         "cancel_local_llm_download" => {
             crate::commands::local_llm_commands::cancel_local_llm_download(app.state::<crate::downloads::DownloadsManager>(), arg_string(&args, "entryId")?).await?;
             Ok(Value::Null)
         }
-        "cancel_triage_tick" => to_value(crate::commands::triage_commands::cancel_triage_tick(app.clone()).await?),
         "conductor_source_available" => to_value(crate::commands::conductor_commands::conductor_source_available()),
-        "count_open_triage_candidates" => to_value(crate::commands::triage_commands::count_open_triage_candidates().await?),
         "create_grex_issue" => to_value(crate::commands::feedback_commands::create_grex_issue(arg_string(&args, "title")?, arg_string(&args, "body")?).await?),
         "detect_local_llm_hardware" => to_value(crate::commands::local_llm_commands::detect_local_llm_hardware().await?),
         "find_existing_grex_repo" => to_value(crate::commands::feedback_commands::find_existing_grex_repo().await?),
         "fork_grex_upstream" => to_value(crate::commands::feedback_commands::fork_grex_upstream().await?),
         "get_local_llm_endpoint" => to_value(crate::commands::local_llm_commands::get_local_llm_endpoint(app.state::<crate::local_llm::Manager>()).await?),
         "get_local_llm_status" => to_value(crate::commands::local_llm_commands::get_local_llm_status(app.state::<crate::local_llm::Manager>()).await?),
-        "get_triage_active_status" => to_value(crate::commands::triage_commands::get_triage_active_status(app.state::<crate::triage::ActiveStatusStore>()).await?),
-        "get_triage_config" => to_value(crate::commands::triage_commands::get_triage_config().await?),
-        "get_triage_source_health" => to_value(crate::commands::triage_commands::get_triage_source_health().await?),
         "import_conductor_workspaces" => to_value(crate::commands::conductor_commands::import_conductor_workspaces(app.clone(), arg_json(&args, "workspaceIds")?).await?),
         "inspect_local_llm_catalog_entry" => to_value(crate::commands::local_llm_commands::inspect_local_llm_catalog_entry(arg_string(&args, "entryId")?).await?),
         "inspect_local_llm_model" => to_value(crate::commands::local_llm_commands::inspect_local_llm_model(arg_string(&args, "path")?).await?),
@@ -418,14 +458,8 @@ async fn dispatch(
         "list_conductor_workspaces" => to_value(crate::commands::conductor_commands::list_conductor_workspaces(arg_string(&args, "repoId")?).await?),
         "list_local_llm_catalog" => to_value(crate::commands::local_llm_commands::list_local_llm_catalog().await?),
         "list_local_llm_downloads" => to_value(crate::commands::local_llm_commands::list_local_llm_downloads(app.state::<crate::downloads::DownloadsManager>()).await?),
-        "list_open_triage_candidates" => to_value(crate::commands::triage_commands::list_open_triage_candidates(arg_int(&args, "limit")?).await?),
         "pause_local_llm_download" => {
             crate::commands::local_llm_commands::pause_local_llm_download(app.state::<crate::downloads::DownloadsManager>(), arg_string(&args, "entryId")?).await?;
-            Ok(Value::Null)
-        }
-        "read_triage_candidate" => to_value(crate::commands::triage_commands::read_triage_candidate(arg_string(&args, "candidateId")?, arg_opt_string(&args, "grep")).await?),
-        "record_triage_decision" => {
-            crate::commands::triage_commands::record_triage_decision(arg_string(&args, "candidateId")?, arg_string(&args, "decision")?, arg_opt_string(&args, "reason")).await?;
             Ok(Value::Null)
         }
         "set_local_llm_context_override" => to_value(crate::commands::local_llm_commands::set_local_llm_context_override(app.clone(), arg_string(&args, "entryId")?, arg_int(&args, "contextTokens")?).await?),
@@ -447,22 +481,80 @@ async fn dispatch(
             crate::commands::local_llm_commands::stop_local_llm(app.clone()).await?;
             Ok(Value::Null)
         }
-        "trigger_triage_tick_now" => to_value(crate::commands::triage_commands::trigger_triage_tick_now(app.clone()).await?),
-        "update_triage_config" => {
-            crate::commands::triage_commands::update_triage_config(app.clone(), arg_json(&args, "config")?).await?;
-            Ok(Value::Null)
-        }
 
         // ============ data domains: Linear context source ============
-        "linear_connection_status" => to_value(crate::commands::linear_commands::linear_connection_status().await?),
+        "linear_connections" => to_value(crate::commands::linear_commands::linear_connections().await?),
         "linear_connect" => to_value(crate::commands::linear_commands::linear_connect(app.clone(), arg_string(&args, "apiKey")?).await?),
         "linear_disconnect" => {
-            crate::commands::linear_commands::linear_disconnect(app.clone()).await?;
+            crate::commands::linear_commands::linear_disconnect(app.clone(), arg_string(&args, "connectionId")?).await?;
             Ok(Value::Null)
         }
-        "linear_list_inbox_items" => to_value(crate::commands::linear_commands::linear_list_inbox_items(app.clone(), arg_opt_string(&args, "cursor"), arg_opt_int(&args, "limit")).await?),
-        "linear_search_issues" => to_value(crate::commands::linear_commands::linear_search_issues(app.clone(), arg_string(&args, "query")?, arg_opt_string(&args, "cursor"), arg_opt_int(&args, "limit")).await?),
-        "linear_get_issue" => to_value(crate::commands::linear_commands::linear_get_issue(app.clone(), arg_string(&args, "issueId")?).await?),
+        "linear_update_scope" => to_value(crate::commands::linear_commands::linear_update_scope(app.clone(), arg_string(&args, "connectionId")?, arg_json(&args, "scope")?, arg_json(&args, "teamIds")?, arg_json(&args, "projectIds")?).await?),
+        "linear_list_inbox_items" => to_value(crate::commands::linear_commands::linear_list_inbox_items(app.clone(), arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "linear_search_issues" => to_value(crate::commands::linear_commands::linear_search_issues(app.clone(), arg_string(&args, "query")?, arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "linear_get_issue" => to_value(crate::commands::linear_commands::linear_get_issue(app.clone(), arg_string(&args, "connectionId")?, arg_string(&args, "issueId")?).await?),
+        "linear_list_teams" => to_value(crate::commands::linear_commands::linear_list_teams(app.clone(), arg_string(&args, "connectionId")?).await?),
+        "linear_list_projects" => to_value(crate::commands::linear_commands::linear_list_projects(app.clone(), arg_string(&args, "connectionId")?, arg_opt_string(&args, "teamId")).await?),
+
+        // ============ data domains: Jira context source ============
+        "jira_connections" => to_value(crate::commands::jira_commands::jira_connections().await?),
+        "jira_connect" => to_value(crate::commands::jira_commands::jira_connect(app.clone(), arg_string(&args, "site")?, arg_string(&args, "email")?, arg_string(&args, "token")?).await?),
+        "jira_disconnect" => {
+            crate::commands::jira_commands::jira_disconnect(app.clone(), arg_string(&args, "connectionId")?).await?;
+            Ok(Value::Null)
+        }
+        "jira_update_scope" => to_value(crate::commands::jira_commands::jira_update_scope(app.clone(), arg_string(&args, "connectionId")?, arg_json(&args, "assignedOnly")?, arg_json(&args, "projectKeys")?).await?),
+        "jira_list_inbox_items" => to_value(crate::commands::jira_commands::jira_list_inbox_items(app.clone(), arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "jira_search_issues" => to_value(crate::commands::jira_commands::jira_search_issues(app.clone(), arg_string(&args, "query")?, arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "jira_get_issue" => to_value(crate::commands::jira_commands::jira_get_issue(app.clone(), arg_string(&args, "connectionId")?, arg_string(&args, "issueId")?).await?),
+        "jira_list_projects" => to_value(crate::commands::jira_commands::jira_list_projects(arg_string(&args, "connectionId")?).await?),
+
+        // ============ data domains: Trello context source ============
+        "trello_connections" => to_value(crate::commands::trello_commands::trello_connections().await?),
+        "trello_connect" => to_value(crate::commands::trello_commands::trello_connect(app.clone(), arg_string(&args, "apiKey")?, arg_string(&args, "token")?).await?),
+        "trello_disconnect" => {
+            crate::commands::trello_commands::trello_disconnect(app.clone(), arg_string(&args, "connectionId")?).await?;
+            Ok(Value::Null)
+        }
+        "trello_update_scope" => to_value(crate::commands::trello_commands::trello_update_scope(app.clone(), arg_string(&args, "connectionId")?, arg_json(&args, "assignedOnly")?, arg_json(&args, "boardIds")?).await?),
+        "trello_list_inbox_items" => to_value(crate::commands::trello_commands::trello_list_inbox_items(app.clone(), arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "trello_search_issues" => to_value(crate::commands::trello_commands::trello_search_issues(app.clone(), arg_string(&args, "query")?, arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "trello_get_issue" => to_value(crate::commands::trello_commands::trello_get_issue(app.clone(), arg_string(&args, "connectionId")?, arg_string(&args, "issueId")?).await?),
+        "trello_list_boards" => to_value(crate::commands::trello_commands::trello_list_boards(arg_string(&args, "connectionId")?).await?),
+
+        // ============ data domains: Forgejo context source ============
+        "forgejo_connections" => to_value(crate::commands::forgejo_commands::forgejo_connections().await?),
+        "forgejo_connect" => to_value(crate::commands::forgejo_commands::forgejo_connect(app.clone(), arg_string(&args, "host")?, arg_string(&args, "token")?).await?),
+        "forgejo_disconnect" => {
+            crate::commands::forgejo_commands::forgejo_disconnect(app.clone(), arg_string(&args, "connectionId")?).await?;
+            Ok(Value::Null)
+        }
+        "forgejo_update_scope" => to_value(crate::commands::forgejo_commands::forgejo_update_scope(app.clone(), arg_string(&args, "connectionId")?, arg_json(&args, "assignedOnly")?).await?),
+        "forgejo_list_inbox_items" => to_value(crate::commands::forgejo_commands::forgejo_list_inbox_items(app.clone(), arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "forgejo_search_issues" => to_value(crate::commands::forgejo_commands::forgejo_search_issues(app.clone(), arg_string(&args, "query")?, arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "forgejo_get_issue" => to_value(crate::commands::forgejo_commands::forgejo_get_issue(app.clone(), arg_string(&args, "connectionId")?, arg_string(&args, "issueId")?).await?),
+
+        // ============ data domains: Featurebase context source ============
+        "featurebase_connections" => to_value(crate::commands::featurebase_commands::featurebase_connections().await?),
+        "featurebase_connect" => to_value(crate::commands::featurebase_commands::featurebase_connect(app.clone(), arg_string(&args, "apiKey")?, arg_string(&args, "orgUrl")?).await?),
+        "featurebase_disconnect" => {
+            crate::commands::featurebase_commands::featurebase_disconnect(app.clone(), arg_string(&args, "connectionId")?).await?;
+            Ok(Value::Null)
+        }
+        "featurebase_list_inbox_items" => to_value(crate::commands::featurebase_commands::featurebase_list_inbox_items(app.clone(), arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "featurebase_search_issues" => to_value(crate::commands::featurebase_commands::featurebase_search_issues(app.clone(), arg_string(&args, "query")?, arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "featurebase_get_issue" => to_value(crate::commands::featurebase_commands::featurebase_get_issue(app.clone(), arg_string(&args, "connectionId")?, arg_string(&args, "issueId")?).await?),
+
+        // ============ data domains: Plain context source ============
+        "plain_connections" => to_value(crate::commands::plain_commands::plain_connections().await?),
+        "plain_connect" => to_value(crate::commands::plain_commands::plain_connect(app.clone(), arg_string(&args, "apiKey")?).await?),
+        "plain_disconnect" => {
+            crate::commands::plain_commands::plain_disconnect(app.clone(), arg_string(&args, "connectionId")?).await?;
+            Ok(Value::Null)
+        }
+        "plain_list_inbox_items" => to_value(crate::commands::plain_commands::plain_list_inbox_items(app.clone(), arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "plain_search_issues" => to_value(crate::commands::plain_commands::plain_search_issues(app.clone(), arg_string(&args, "query")?, arg_opt_json(&args, "cursors")?, arg_opt_int(&args, "limit")).await?),
+        "plain_get_issue" => to_value(crate::commands::plain_commands::plain_get_issue(app.clone(), arg_string(&args, "connectionId")?, arg_string(&args, "issueId")?).await?),
 
         // ============ desktop-only / destructive: no-op for a phone ============
         // Companion self-management: a paired browser does not administer the
@@ -478,11 +570,8 @@ async fn dispatch(
         |         "companion_status"
         // PTY control over HTTP is meaningless (no terminal on the phone); the
         // matching spawn_* commands carry a Channel and route to /rpc-stream.
-        |         "resize_lark_cli_auth_terminal"
         |         "resize_terminal"
-        |         "stop_lark_cli_auth_terminal"
         |         "stop_terminal"
-        |         "write_lark_cli_auth_terminal_stdin"
         |         "write_terminal_stdin"
         // SSE drop already auto-unsubscribes; the explicit call is a redundant
         // best-effort cleanup.

@@ -116,18 +116,12 @@ pub enum UiMutationEvent {
     SlackTokenInvalidated {
         team_id: String,
     },
-    /// Linear connection state changed (Connect / Disconnect / token
-    /// invalidated). Frontends invalidate the `linearConnection` query and
-    /// every `linearInbox` query so the inbox + settings panels re-render
-    /// the connect ↔ connected state.
-    LinearConnectionChanged,
-    /// AI-triage config changed.
-    TriageConfigChanged,
-    /// Active tick status changed (begin / progress / end).
-    TriageActiveStatusChanged,
-    /// An AI-triage workspace was created. Frontend invalidates sidebar.
-    TriageWorkspaceCreated {
-        workspace_id: String,
+    /// An issue-provider (Linear / Jira / Trello) connection set changed
+    /// (Connect / Disconnect / credentials invalidated). Frontends invalidate
+    /// that provider's connection + inbox queries so the inbox + settings
+    /// panels re-render the connect ↔ connected state.
+    IssueConnectionChanged {
+        provider: crate::issues::provider::ProviderKind,
     },
     /// Fast mode was requested but didn't engage; the composer flips its
     /// fast-mode toggle off for this session.
@@ -138,6 +132,19 @@ pub enum UiMutationEvent {
     /// The mobile-companion paired-device list changed (paired or revoked).
     /// Frontends invalidate the `pairedDevices` query.
     PairedDevicesChanged,
+    /// An automation was created/edited/deleted/paused, or the scheduler
+    /// fired a run (shifting next/last run). Frontends invalidate the
+    /// `automations` query.
+    AutomationsChanged,
+    /// The Library's reusable Prompts changed (create / update / delete /
+    /// reorder). Frontends invalidate the `libraryPrompts` query.
+    LibraryPromptsChanged,
+    /// The Library's MCP servers changed (create / update / delete).
+    /// Frontends invalidate the `libraryMcpServers` query.
+    LibraryMcpServersChanged,
+    /// The Library's Skills changed (create / update / delete). Frontends
+    /// invalidate the `librarySkills` query.
+    LibrarySkillsChanged,
     /// "Open in Grex" from the quick panel. Only the MAIN window acts on
     /// this (navigates to the workspace/session); the quick panel ignores it.
     WorkspaceRevealRequested {
@@ -244,11 +251,6 @@ mod tests {
             UiMutationEvent::SlackTokenInvalidated {
                 team_id: "T1".into(),
             },
-            UiMutationEvent::TriageConfigChanged,
-            UiMutationEvent::TriageActiveStatusChanged,
-            UiMutationEvent::TriageWorkspaceCreated {
-                workspace_id: "w".into(),
-            },
             UiMutationEvent::FastModeUnavailable {
                 session_id: "s".into(),
                 reason: "extra usage not enabled".into(),
@@ -308,6 +310,7 @@ mod tests {
                 UiMutationEvent::ActiveStreamsChanged,
                 "activeStreamsChanged",
             ),
+            (UiMutationEvent::AutomationsChanged, "automationsChanged"),
         ];
         for (event, expected) in cases {
             let json = serde_json::to_value(&event).unwrap();

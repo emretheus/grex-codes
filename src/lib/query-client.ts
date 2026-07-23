@@ -4,6 +4,7 @@ import type { ThreadMessageLike } from "./api";
 import {
 	type ActionKind,
 	type AgentProvider,
+	type Automation,
 	type ChangeRequestInfo,
 	DEFAULT_PROVIDER_CAPABILITIES,
 	DEFAULT_WORKSPACE_GROUPS,
@@ -23,10 +24,15 @@ import {
 	getWorkspaceAccountProfile,
 	getWorkspaceForge,
 	listActiveStreams,
+	listAutomations,
+	listDirectory,
 	listForgeAccounts,
 	listForgeLabels,
 	listInboxKindLabels,
+	listLibraryPrompts,
+	listMcpServers,
 	listRepositories,
+	listSkills,
 	listSlashCommands,
 	listWorkspaceCandidateDirectories,
 	listWorkspaceChanges,
@@ -107,6 +113,8 @@ export const grexQueryKeys = {
 		["workspaceChanges", workspaceRootPath, workspaceId ?? ""] as const,
 	workspaceFiles: (workspaceRootPath: string) =>
 		["workspaceFiles", workspaceRootPath] as const,
+	directoryListing: (workspaceRootPath: string, relPath: string) =>
+		["directoryListing", workspaceRootPath, relPath] as const,
 	workspaceChangeRequest: (workspaceId: string) =>
 		["workspaceChangeRequest", workspaceId] as const,
 	workspaceForge: (workspaceId: string) =>
@@ -164,14 +172,48 @@ export const grexQueryKeys = {
 	slackThread: (teamId: string, channelId: string, anchorTs: string) =>
 		["slackThread", teamId, channelId, anchorTs] as const,
 	slackEmojiMap: (teamId: string) => ["slackEmojiMap", teamId] as const,
-	linearConnection: ["linearConnection"] as const,
+	linearConnections: ["linearConnections"] as const,
 	linearInbox: ["linearInbox"] as const,
 	linearSearch: (query: string) => ["linearSearch", query] as const,
-	linearIssueDetail: (issueId: string) =>
-		["linearIssueDetail", issueId] as const,
-	triageConfig: ["triage", "config"] as const,
-	triageActiveStatus: ["triage", "activeStatus"] as const,
+	linearTeams: (connectionId: string) => ["linearTeams", connectionId] as const,
+	linearProjects: (connectionId: string, teamId: string | null) =>
+		["linearProjects", connectionId, teamId ?? ""] as const,
+	linearIssueDetail: (connectionId: string, issueId: string) =>
+		["linearIssueDetail", connectionId, issueId] as const,
+	jiraConnections: ["jiraConnections"] as const,
+	jiraInbox: ["jiraInbox"] as const,
+	jiraSearch: (query: string) => ["jiraSearch", query] as const,
+	jiraProjects: (connectionId: string) =>
+		["jiraProjects", connectionId] as const,
+	jiraIssueDetail: (connectionId: string, issueId: string) =>
+		["jiraIssueDetail", connectionId, issueId] as const,
+	trelloConnections: ["trelloConnections"] as const,
+	trelloInbox: ["trelloInbox"] as const,
+	trelloSearch: (query: string) => ["trelloSearch", query] as const,
+	trelloBoards: (connectionId: string) =>
+		["trelloBoards", connectionId] as const,
+	trelloIssueDetail: (connectionId: string, issueId: string) =>
+		["trelloIssueDetail", connectionId, issueId] as const,
+	forgejoConnections: ["forgejoConnections"] as const,
+	forgejoInbox: ["forgejoInbox"] as const,
+	forgejoSearch: (query: string) => ["forgejoSearch", query] as const,
+	forgejoIssueDetail: (connectionId: string, issueId: string) =>
+		["forgejoIssueDetail", connectionId, issueId] as const,
+	featurebaseConnections: ["featurebaseConnections"] as const,
+	featurebaseInbox: ["featurebaseInbox"] as const,
+	featurebaseSearch: (query: string) => ["featurebaseSearch", query] as const,
+	featurebaseIssueDetail: (connectionId: string, issueId: string) =>
+		["featurebaseIssueDetail", connectionId, issueId] as const,
+	plainConnections: ["plainConnections"] as const,
+	plainInbox: ["plainInbox"] as const,
+	plainSearch: (query: string) => ["plainSearch", query] as const,
+	plainIssueDetail: (connectionId: string, issueId: string) =>
+		["plainIssueDetail", connectionId, issueId] as const,
 	pairedDevices: ["pairedDevices"] as const,
+	automations: ["automations"] as const,
+	libraryPrompts: ["libraryPrompts"] as const,
+	libraryMcpServers: ["libraryMcpServers"] as const,
+	librarySkills: ["librarySkills"] as const,
 };
 
 /** Persistence is opt-in per `queryOptions` via `meta: { persist: true }`.
@@ -347,6 +389,14 @@ export function workspaceGroupsQueryOptions() {
 	});
 }
 
+export function automationsQueryOptions() {
+	return queryOptions<Automation[]>({
+		queryKey: grexQueryKeys.automations,
+		queryFn: listAutomations,
+		staleTime: 0,
+	});
+}
+
 export function archivedWorkspacesQueryOptions() {
 	return queryOptions({
 		queryKey: grexQueryKeys.archivedWorkspaces,
@@ -362,6 +412,44 @@ export function repositoriesQueryOptions() {
 	return queryOptions({
 		queryKey: grexQueryKeys.repositories,
 		queryFn: listRepositories,
+		initialData: [],
+		initialDataUpdatedAt: 0,
+		staleTime: 0,
+		meta: PERSIST_META,
+	});
+}
+
+/** Library prompts. Invalidated by the ui-sync bridge on
+ *  `libraryPromptsChanged`. Persisted so the picker is populated instantly
+ *  on next launch. */
+export function libraryPromptsQueryOptions() {
+	return queryOptions({
+		queryKey: grexQueryKeys.libraryPrompts,
+		queryFn: listLibraryPrompts,
+		initialData: [],
+		initialDataUpdatedAt: 0,
+		staleTime: 0,
+		meta: PERSIST_META,
+	});
+}
+
+/** Library MCP servers. Invalidated on `libraryMcpServersChanged`. */
+export function libraryMcpServersQueryOptions() {
+	return queryOptions({
+		queryKey: grexQueryKeys.libraryMcpServers,
+		queryFn: listMcpServers,
+		initialData: [],
+		initialDataUpdatedAt: 0,
+		staleTime: 0,
+		meta: PERSIST_META,
+	});
+}
+
+/** Library skills. Invalidated on `librarySkillsChanged`. */
+export function librarySkillsQueryOptions() {
+	return queryOptions({
+		queryKey: grexQueryKeys.librarySkills,
+		queryFn: listSkills,
 		initialData: [],
 		initialDataUpdatedAt: 0,
 		staleTime: 0,
@@ -1030,6 +1118,20 @@ export function workspaceFilesQueryOptions(workspaceRootPath: string) {
 		queryKey: grexQueryKeys.workspaceFiles(workspaceRootPath),
 		queryFn: () => listWorkspaceFiles(workspaceRootPath),
 		staleTime: 60_000,
+		gcTime: DEFAULT_GC_TIME,
+		retry: 0,
+	});
+}
+
+/** One directory level for the file-explorer tree (lazy, per-folder). */
+export function directoryListingQueryOptions(
+	workspaceRootPath: string,
+	relPath: string,
+) {
+	return queryOptions({
+		queryKey: grexQueryKeys.directoryListing(workspaceRootPath, relPath),
+		queryFn: () => listDirectory(workspaceRootPath, relPath),
+		staleTime: 30_000,
 		gcTime: DEFAULT_GC_TIME,
 		retry: 0,
 	});

@@ -1,5 +1,10 @@
 import { createContext, useContext } from "react";
 import type { WorkspaceBranchIntent } from "./api";
+import {
+	DEFAULT_LANGUAGE,
+	isSupportedLanguage,
+	type SupportedLanguage,
+} from "./i18n/locales";
 // Routed through the transport shim so settings load works in the mobile
 // browser companion too (not just the Tauri webview).
 import { invoke } from "./ipc";
@@ -267,6 +272,16 @@ export type StartSurfacePreferences = {
 	chatModeActive: boolean;
 	/** Start-composer Terminal-Mode toggle. */
 	terminalModeActive: boolean;
+	/** Composer picks (model / effort / permission / fast) keyed by the start
+	 *  context key (`start:chat`, `start:repo:<id>`, `start:no-repo`). The start
+	 *  surface has no session row to persist against, so without these the picks
+	 *  reset when the user navigates away and the start subtree unmounts. Model
+	 *  values are plain model ids (Grex stores model selections as strings, not
+	 *  provider+id pairs). */
+	composerModelByContextKey: Record<string, string>;
+	composerEffortByContextKey: Record<string, string>;
+	composerPermissionModeByContextKey: Record<string, string>;
+	composerFastModeByContextKey: Record<string, boolean>;
 };
 
 export type AppSettings = {
@@ -282,6 +297,9 @@ export type AppSettings = {
 	/** When true, all clickable elements show a pointer cursor on hover.
 	 *  When false, falls back to the default arrow. */
 	usePointerCursors: boolean;
+	/** Display language (BCP-47 base code). Mirrored to localStorage for a
+	 *  flash-free, correctly-localized first paint. */
+	language: SupportedLanguage;
 	theme: ThemeMode;
 	/** Color preset applied when the effective mode is `light`. */
 	lightTheme: ColorTheme;
@@ -375,6 +393,10 @@ export const DEFAULT_START_SURFACE_PREFERENCES: StartSurfacePreferences = {
 	branchIntentByRepoId: {},
 	chatModeActive: false,
 	terminalModeActive: false,
+	composerModelByContextKey: {},
+	composerEffortByContextKey: {},
+	composerPermissionModeByContextKey: {},
+	composerFastModeByContextKey: {},
 };
 
 /** Fallbacks for repos without a per-repo entry. */
@@ -414,6 +436,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 	codeFontFamily: null,
 	terminalFontFamily: null,
 	usePointerCursors: true,
+	language: DEFAULT_LANGUAGE,
 	theme: "system",
 	lightTheme: "default",
 	darkTheme: "default",
@@ -497,11 +520,13 @@ export const SIDEBAR_SORT_STORAGE_KEY = "grex-sidebar-sort";
 export const UI_FONT_FAMILY_STORAGE_KEY = "grex-ui-font-family";
 export const CODE_FONT_FAMILY_STORAGE_KEY = "grex-code-font-family";
 export const TERMINAL_FONT_FAMILY_STORAGE_KEY = "grex-terminal-font-family";
+export const LANGUAGE_STORAGE_KEY = "grex-language";
 
 /** Keys mirrored to localStorage for flash-free synchronous boot reads.
  *  Anything visible in the first paint must live here so we don't wait
  *  on the async SQLite round-trip. */
 const LOCALSTORAGE_KEYS = {
+	language: LANGUAGE_STORAGE_KEY,
 	theme: THEME_STORAGE_KEY,
 	lightTheme: LIGHT_THEME_STORAGE_KEY,
 	darkTheme: DARK_THEME_STORAGE_KEY,
@@ -547,6 +572,16 @@ export function getPreloadedTheme(): ThemeMode {
 	return (raw as ThemeMode | null) ?? DEFAULT_SETTINGS.theme;
 }
 
+// Synchronous language read so i18n can initialize with the right locale
+// before first paint (mirrors `getPreloadedTheme`).
+export function getPreloadedLanguage(): SupportedLanguage {
+	if (typeof localStorage === "undefined") {
+		return DEFAULT_SETTINGS.language;
+	}
+	const raw = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+	return isSupportedLanguage(raw) ? raw : DEFAULT_SETTINGS.language;
+}
+
 function readLocalStorageString(key: string): string | null {
 	if (typeof localStorage === "undefined") return null;
 	const v = localStorage.getItem(key);
@@ -583,6 +618,7 @@ export function getPreloadedSettings(): AppSettings {
 	})();
 	return {
 		...DEFAULT_SETTINGS,
+		language: getPreloadedLanguage(),
 		theme: getPreloadedTheme(),
 		lightTheme,
 		darkTheme,
@@ -904,6 +940,17 @@ function parseStringRecord(value: unknown): Record<string, string> {
 	);
 }
 
+function parseBooleanRecord(value: unknown): Record<string, boolean> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return {};
+	}
+	return Object.fromEntries(
+		Object.entries(value).filter(
+			([key, entry]) => key.length > 0 && typeof entry === "boolean",
+		),
+	) as Record<string, boolean>;
+}
+
 /** Like `parseStringRecord`, with each value constrained to `allowed`. */
 function parseEnumRecord<V extends string>(
 	value: unknown,
@@ -989,6 +1036,19 @@ function parseStartSurfacePreferences(
 				typeof o.terminalModeActive === "boolean"
 					? o.terminalModeActive
 					: false,
+			// Model selections are plain id strings in Grex, so `parseStringRecord`
+			// validates them (drops non-string / empty values) just like effort
+			// and permission mode.
+			composerModelByContextKey: parseStringRecord(o.composerModelByContextKey),
+			composerEffortByContextKey: parseStringRecord(
+				o.composerEffortByContextKey,
+			),
+			composerPermissionModeByContextKey: parseStringRecord(
+				o.composerPermissionModeByContextKey,
+			),
+			composerFastModeByContextKey: parseBooleanRecord(
+				o.composerFastModeByContextKey,
+			),
 		};
 	} catch {
 		return DEFAULT_START_SURFACE_PREFERENCES;
@@ -1282,6 +1342,7 @@ export async function loadSettings(): Promise<AppSettings> {
 				raw[SETTINGS_KEY_MAP.usePointerCursors] !== undefined
 					? raw[SETTINGS_KEY_MAP.usePointerCursors] === "true"
 					: DEFAULT_SETTINGS.usePointerCursors,
+			language: getPreloadedLanguage(),
 			theme:
 				(localStorage.getItem(THEME_STORAGE_KEY) as AppSettings["theme"]) ??
 				DEFAULT_SETTINGS.theme,

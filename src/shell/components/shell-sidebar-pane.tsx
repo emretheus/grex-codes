@@ -1,6 +1,6 @@
 // Left workspace sidebar — workspaces list, app-update button, sidebar
 // collapse, and the settings entry button at the bottom.
-import { PanelLeftClose } from "lucide-react";
+import { Clock, PanelLeftClose } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { FeedbackButton } from "@/features/feedback";
+import { LibraryButton } from "@/features/library";
 import { WorkspacesSidebarContainer } from "@/features/navigation/container";
 import { SettingsButton } from "@/features/settings";
 import { getShortcut } from "@/features/shortcuts/registry";
@@ -54,8 +55,34 @@ type Props = {
 	onCollapseSidebar: () => void;
 	onOpenFeedback: () => void;
 	onOpenSettings: () => void;
+	onOpenAutomations: () => void;
 	pushWorkspaceToast: PushWorkspaceToast;
 };
+
+function AutomationsButton({ onClick }: { onClick: () => void }) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<Button
+					variant="ghost"
+					size="icon"
+					aria-label="Automations"
+					onClick={onClick}
+					className="text-muted-foreground hover:text-foreground"
+				>
+					<Clock className="size-[15px]" strokeWidth={1.8} />
+				</Button>
+			</TooltipTrigger>
+			<TooltipContent
+				side="top"
+				sideOffset={4}
+				className="flex h-[24px] items-center rounded-md px-2 text-small leading-none"
+			>
+				<span className="leading-none">Automations</span>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
 
 export function ShellSidebarPane({
 	collapsed,
@@ -80,6 +107,7 @@ export function ShellSidebarPane({
 	onCollapseSidebar,
 	onOpenFeedback,
 	onOpenSettings,
+	onOpenAutomations,
 	pushWorkspaceToast,
 }: Props) {
 	// Read the selected workspace + start flag from the ROUTER (Stage 3b: the
@@ -218,6 +246,10 @@ export function ShellSidebarPane({
 								onClick={onOpenSettings}
 								shortcut={getShortcut(appSettings.shortcuts, "settings.open")}
 							/>
+							<LibraryButton
+								shortcut={getShortcut(appSettings.shortcuts, "library.open")}
+							/>
+							<AutomationsButton onClick={onOpenAutomations} />
 							<FeedbackButton onClick={onOpenFeedback} />
 						</div>
 						<AppUpdateButton status={appUpdateStatus} />

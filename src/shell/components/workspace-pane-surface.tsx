@@ -4,11 +4,14 @@
 // branch and renders either <StartSurfacePane> (start) or
 // <ShellWorkspaceConversation> (chat) below the editor. Selection-track reads
 // stay inside ShellWorkspaceConversation; only the delivery channel moved.
+import { useState } from "react";
+import { AutomationsSurface } from "@/features/automations";
 import type {
 	ComposerCreateContext,
 	WorkspaceConversationContainerProps,
 } from "@/features/conversation";
 import { WorkspaceEditorSurface } from "@/features/editor";
+import { EditorExplorerLanding } from "@/features/editor/explorer-landing";
 import { getShortcut } from "@/features/shortcuts/registry";
 import type { WorkspaceStartPage } from "@/features/workspace-start";
 import type { ChangeRequestInfo, RepositoryCreateOption } from "@/lib/api";
@@ -26,6 +29,11 @@ import type {
 import type { StartSurfaceActions } from "@/shell/controllers/use-start-surface-controller";
 import { ShellWorkspaceConversation } from "./shell-workspace-conversation";
 import { StartSurfacePane } from "./start-surface-pane";
+
+// Prefilled prompt for "Create via chat" (mirrors Codex's flow): the agent
+// explains automations and creates one via the `grex automation` CLI.
+const CREATE_AUTOMATION_VIA_CHAT_PROMPT =
+	"I want to set up an automation. Briefly explain how automations work in Grex (run `grex automation create --help` to see the options), then ask me a few questions to figure out what I'd like it to do and when it should run. Once we've agreed, create it with the grex CLI.";
 
 type ConversationProps = WorkspaceConversationContainerProps;
 type StartPageProps = Parameters<typeof WorkspaceStartPage>[0];
@@ -68,6 +76,7 @@ type Props = {
 	startComposerContextKey: string;
 	startCreateContext: ComposerCreateContext | null;
 	startLinkedDirectoriesController: ConversationProps["composerLinkedDirectoriesController"];
+	startComposerSettingsController: ConversationProps["composerSettingsController"];
 	/** Quick panel: composer pinned to the bottom of the start surface. */
 	startComposerAtBottom?: boolean;
 	// Conversation (chat) only
@@ -118,6 +127,7 @@ export function WorkspacePaneSurface({
 	startComposerContextKey,
 	startCreateContext,
 	startLinkedDirectoriesController,
+	startComposerSettingsController,
 	startComposerAtBottom,
 	repoId,
 	sessionSelectionHistory,
@@ -130,6 +140,25 @@ export function WorkspacePaneSurface({
 	headerLeadingNode,
 	headerActionsNode,
 }: Props) {
+	// Explorer sidebar visibility + width, owned here so they persist across
+	// file opens and the explorer landing (rather than resetting each time the
+	// editor surface mounts). Defaults open — the tree is the browse entry point.
+	const [explorerOpen, setExplorerOpen] = useState(() =>
+		readStoredBool("grex.explorer.open", true),
+	);
+	const [explorerWidth, setExplorerWidth] = useState(() =>
+		readStoredNumber("grex.explorer.width", 260),
+	);
+	const toggleExplorer = () =>
+		setExplorerOpen((prev) => {
+			const next = !prev;
+			writeStored("grex.explorer.open", String(next));
+			return next;
+		});
+	const changeExplorerWidth = (next: number) => {
+		setExplorerWidth(next);
+		writeStored("grex.explorer.width", String(Math.round(next)));
+	};
 	return (
 		<section
 			aria-label="Workspace panel"
@@ -159,7 +188,21 @@ export function WorkspacePaneSurface({
 						workspaceRootPath={workspaceRootPath}
 						onChangeSession={handleEditorSessionChange}
 						onExit={editorSessionActions.exit}
+						explorerOpen={explorerOpen}
+						onToggleExplorer={toggleExplorer}
+						explorerWidth={explorerWidth}
+						onExplorerWidthChange={changeExplorerWidth}
+						onCloseLastFile={editorSessionActions.returnToExplorer}
 						onError={editorSessionActions.reportError}
+					/>
+				)}
+				{workspaceViewMode === "editor" && !editorSession && (
+					<EditorExplorerLanding
+						workspaceRootPath={workspaceRootPath}
+						onOpenFile={editorSessionActions.openFileReference}
+						onExit={editorSessionActions.exit}
+						explorerWidth={explorerWidth}
+						onExplorerWidthChange={changeExplorerWidth}
 					/>
 				)}
 				<div
@@ -170,7 +213,26 @@ export function WorkspacePaneSurface({
 							: "flex min-h-0 flex-1 flex-col"
 					}
 				>
-					{workspaceViewMode === "start" ? (
+					{workspaceViewMode === "automations" ? (
+						<AutomationsSurface
+							onOpenSession={(workspaceId, sessionId) => {
+								selectionActions.selectWorkspace(workspaceId);
+								selectionActions.selectSession(sessionId);
+							}}
+							onCreateViaChat={() => {
+								selectionActions.openStart();
+								pendingQueueActions.insertIntoComposer({
+									target: { contextKey: startComposerContextKey },
+									items: [
+										{
+											kind: "text",
+											text: CREATE_AUTOMATION_VIA_CHAT_PROMPT,
+										},
+									],
+								});
+							}}
+						/>
+					) : workspaceViewMode === "start" ? (
 						<StartSurfacePane
 							repositories={repositories}
 							startRepository={startRepository}
@@ -186,6 +248,7 @@ export function WorkspacePaneSurface({
 							startLinkedDirectoriesController={
 								startLinkedDirectoriesController
 							}
+							startComposerSettingsController={startComposerSettingsController}
 							sidebarCollapsed={sidebarCollapsed}
 							contextPanelOpen={contextPanelOpen}
 							startSurfaceActions={startSurfaceActions}
@@ -257,4 +320,31 @@ export function WorkspacePaneSurface({
 			</div>
 		</section>
 	);
+}
+
+function readStoredBool(key: string, fallback: boolean): boolean {
+	try {
+		const raw = localStorage.getItem(key);
+		return raw === null ? fallback : raw === "true";
+	} catch {
+		return fallback;
+	}
+}
+
+function readStoredNumber(key: string, fallback: number): number {
+	try {
+		const raw = localStorage.getItem(key);
+		const parsed = raw === null ? Number.NaN : Number(raw);
+		return Number.isFinite(parsed) ? parsed : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+function writeStored(key: string, value: string) {
+	try {
+		localStorage.setItem(key, value);
+	} catch {
+		// Best-effort persistence.
+	}
 }

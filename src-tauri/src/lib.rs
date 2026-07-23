@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod automations;
 pub mod cli;
 pub(crate) mod codex_config;
 pub(crate) mod commands;
@@ -12,12 +13,15 @@ pub mod git;
 pub mod global_hotkey;
 pub mod image_store;
 mod import;
-pub mod lark;
+pub mod issues;
+pub mod library;
 pub mod linear;
 pub mod local_llm;
 pub mod logging;
 pub mod maintenance;
 pub mod mcp;
+#[cfg(target_os = "macos")]
+pub mod media_keys;
 pub mod models;
 pub mod pipeline;
 pub(crate) mod platform;
@@ -27,11 +31,9 @@ pub mod schema;
 pub mod service;
 mod shell_env;
 pub mod sidecar;
-pub mod sidecar_host;
 pub mod slack;
 mod system_limits;
 pub mod terminal;
-pub mod triage;
 pub mod ui_sync;
 pub mod updater;
 pub mod workspace;
@@ -65,24 +67,6 @@ fn empty_404() -> tauri::http::Response<Vec<u8>> {
         .status(404)
         .body(Vec::new())
         .expect("404 response builder is infallible")
-}
-
-/// Extension-based MIME sniff for the `grex-attachment` protocol.
-fn mime_for_path(path: &std::path::Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("bmp") => "image/bmp",
-        Some("svg") => "image/svg+xml",
-        _ => "application/octet-stream",
-    }
 }
 
 /// Initialise the database schema (call once at startup).
@@ -136,49 +120,7 @@ pub fn run() {
                 };
                 responder.respond(response);
             });
-        })
-        // Triage priming attachments. Custom scheme so rehype-sanitize can opt it in.
-        .register_asynchronous_uri_scheme_protocol(
-            "grex-attachment",
-            |_app, request, responder| {
-                let uri = request.uri().to_string();
-                std::thread::spawn(move || {
-                    let response = match triage::attachments::resolve_attachment_url(&uri) {
-                        Ok(Some(path)) => match std::fs::read(&path) {
-                            Ok(bytes) => {
-                                let content_type = mime_for_path(&path);
-                                tauri::http::Response::builder()
-                                    .header("Content-Type", content_type)
-                                    // Attachment files are content-stable
-                                    // (uuid-named, never rewritten); cache
-                                    // hard so re-renders don't pay disk IO.
-                                    .header("Cache-Control", "public, max-age=2592000, immutable")
-                                    .body(bytes)
-                                    .unwrap_or_else(|_| empty_404())
-                            }
-                            Err(error) => {
-                                tracing::warn!(
-                                    uri = %uri,
-                                    error = %error,
-                                    "grex-attachment read failed",
-                                );
-                                empty_404()
-                            }
-                        },
-                        Ok(None) => empty_404(),
-                        Err(error) => {
-                            tracing::warn!(
-                                uri = %uri,
-                                error = %format!("{error:#}"),
-                                "grex-attachment resolve failed",
-                            );
-                            empty_404()
-                        }
-                    };
-                    responder.respond(response);
-                });
-            },
-        );
+        });
 
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
@@ -199,7 +141,6 @@ pub fn run() {
         .manage(git_watcher::GitWatcherManager::new())
         .manage(workspace::scripts::ScriptProcessManager::new())
         .manage(ui_sync::UiSyncManager::new())
-        .manage(triage::ActiveStatusStore::new())
         .manage(global_hotkey::GlobalHotkeyState::default())
         .manage(commands::forge_commands::ForgeAuthEdgeStore::default())
         .manage(companion::CompanionState::new())
@@ -311,6 +252,15 @@ pub fn run() {
                 Err(e) => tracing::warn!("Failed to clean up initializing orphans: {e:#}"),
             }
 
+            // One-time cleanup for the removed Smart Triage feature: archive any
+            // leftover unstarted `ai_triage` workspaces (auto-proposed but never
+            // engaged) so they don't linger in the sidebar with no way to act.
+            match workspace::workspaces::archive_unstarted_triage_workspaces() {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(count = n, "Archived leftover unstarted triage workspaces"),
+                Err(e) => tracing::warn!("Failed to archive unstarted triage workspaces: {e:#}"),
+            }
+
             // Runtime registry crash-recovery sweep. Probes every
             // still-open row from a prior launch via `kill(pid, 0)`,
             // stamps dead rows ended, and logs the "maybe alive"
@@ -370,47 +320,6 @@ pub fn run() {
             updater::configure()?;
             updater::spawn_startup_check(app.handle().clone());
             updater::spawn_interval_worker(app.handle().clone());
-
-            // Install reverse-IPC dispatcher early to skip early-boot warnings; ordering isn't load-bearing.
-            let host_rx = app
-                .state::<sidecar::ManagedSidecar>()
-                .install_host_dispatcher();
-            let dispatcher_handle = app.handle().clone();
-            std::thread::Builder::new()
-                .name("sidecar-host-dispatcher".into())
-                .spawn(move || {
-                    while let Ok(env) = host_rx.recv() {
-                        let app_clone = dispatcher_handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let response = match sidecar_host::dispatch(
-                                app_clone.clone(),
-                                &env.method,
-                                env.params,
-                            )
-                            .await
-                            {
-                                Ok(value) => sidecar_host::HostResponse::success(
-                                    env.callback_id.clone(),
-                                    value,
-                                ),
-                                Err(error) => sidecar_host::HostResponse::failure(
-                                    env.callback_id.clone(),
-                                    format!("{error:#}"),
-                                ),
-                            };
-                            let sidecar_state = app_clone.state::<sidecar::ManagedSidecar>();
-                            if let Err(error) = sidecar_state.send_host_response(&response) {
-                                tracing::warn!(
-                                    error = %format!("{error:#}"),
-                                    method = %env.method,
-                                    "hostResponse write failed"
-                                );
-                            }
-                        });
-                    }
-                    tracing::debug!("host dispatcher channel closed");
-                })
-                .ok();
 
             // Per-version silent re-check of the Grex CLI symlink and
             // the Grex Skills package. Runs once per app version
@@ -484,8 +393,10 @@ pub fn run() {
                 tracing::error!(error = %error, "Failed to start UI sync listener");
             }
 
-            // Triage: fetcher + auto-fire tick on the same 5-min thread.
-            triage::fetcher::spawn_scheduler(app.handle().clone());
+            // Automations: stateless 30s poll over `automations.next_run_at`.
+            // Overdue rows (app was closed / machine slept) catch up once on
+            // the first tick after the startup delay.
+            automations::scheduler::spawn_scheduler(app.handle().clone());
 
             // Mobile browser companion (experimental, opt-in via env). Starts a
             // loopback-bound HTTP/SSE server that mirrors the IPC surface so the
@@ -561,6 +472,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             install_macos_menu(app.handle())?;
 
+            // Let Apple-keyboard transport keys (play/pause, next, prev,
+            // fast, rewind) pass through to the system Now Playing app
+            // instead of being swallowed by the webview as an NSBeep.
+            #[cfg(target_os = "macos")]
+            media_keys::install();
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -581,6 +498,12 @@ pub fn run() {
             agents::list_slash_commands,
             agents::prewarm_slash_commands_for_workspace,
             agents::prewarm_slash_commands_for_repo,
+            commands::automation_commands::list_automations,
+            commands::automation_commands::create_automation,
+            commands::automation_commands::update_automation,
+            commands::automation_commands::delete_automation,
+            commands::automation_commands::set_automation_status,
+            commands::automation_commands::run_automation_now,
             commands::workspace_commands::prepare_archive_workspace,
             commands::workspace_commands::start_archive_workspace,
             commands::workspace_commands::validate_archive_workspace,
@@ -696,20 +619,6 @@ pub fn run() {
             commands::terminal_commands::resize_terminal,
             commands::terminal_commands::set_terminal_session_busy,
             commands::terminal_commands::convert_session_to_terminal,
-            commands::triage_commands::get_triage_config,
-            commands::triage_commands::update_triage_config,
-            commands::triage_commands::get_triage_active_status,
-            commands::triage_commands::trigger_triage_tick_now,
-            commands::triage_commands::cancel_triage_tick,
-            commands::triage_commands::list_open_triage_candidates,
-            commands::triage_commands::count_open_triage_candidates,
-            commands::triage_commands::read_triage_candidate,
-            commands::triage_commands::record_triage_decision,
-            commands::triage_commands::get_triage_source_health,
-            commands::triage_lark_cli_commands::spawn_lark_cli_auth_terminal,
-            commands::triage_lark_cli_commands::stop_lark_cli_auth_terminal,
-            commands::triage_lark_cli_commands::write_lark_cli_auth_terminal_stdin,
-            commands::triage_lark_cli_commands::resize_lark_cli_auth_terminal,
             commands::session_commands::list_session_thread_messages,
             commands::workspace_commands::list_workspace_groups,
             commands::session_commands::list_workspace_sessions,
@@ -735,6 +644,7 @@ pub fn run() {
             commands::workspace_commands::get_repo_current_branch,
             commands::workspace_commands::create_and_checkout_branch,
             commands::workspace_commands::move_local_workspace_to_worktree,
+            commands::workspace_commands::rename_workspace,
             commands::workspace_commands::rename_workspace_branch,
             commands::workspace_commands::update_intended_target_branch,
             commands::workspace_commands::prefetch_remote_refs,
@@ -746,6 +656,7 @@ pub fn run() {
             commands::workspace_commands::unpin_workspace,
             commands::editor_commands::list_editor_files,
             commands::editor_commands::list_workspace_files,
+            commands::editor_commands::list_directory,
             commands::editor_commands::list_workspace_changes,
             commands::editor_commands::discard_workspace_file,
             commands::editor_commands::stage_workspace_file,
@@ -798,12 +709,50 @@ pub fn run() {
             commands::updater_commands::check_for_app_update,
             commands::updater_commands::install_downloaded_app_update,
             commands::editor_commands::write_editor_file,
-            commands::linear_commands::linear_connection_status,
+            commands::linear_commands::linear_connections,
             commands::linear_commands::linear_connect,
             commands::linear_commands::linear_disconnect,
+            commands::linear_commands::linear_update_scope,
             commands::linear_commands::linear_list_inbox_items,
             commands::linear_commands::linear_search_issues,
             commands::linear_commands::linear_get_issue,
+            commands::linear_commands::linear_list_teams,
+            commands::linear_commands::linear_list_projects,
+            commands::jira_commands::jira_connections,
+            commands::jira_commands::jira_connect,
+            commands::jira_commands::jira_disconnect,
+            commands::jira_commands::jira_update_scope,
+            commands::jira_commands::jira_list_inbox_items,
+            commands::jira_commands::jira_search_issues,
+            commands::jira_commands::jira_get_issue,
+            commands::jira_commands::jira_list_projects,
+            commands::trello_commands::trello_connections,
+            commands::trello_commands::trello_connect,
+            commands::trello_commands::trello_disconnect,
+            commands::trello_commands::trello_update_scope,
+            commands::trello_commands::trello_list_inbox_items,
+            commands::trello_commands::trello_search_issues,
+            commands::trello_commands::trello_get_issue,
+            commands::trello_commands::trello_list_boards,
+            commands::forgejo_commands::forgejo_connections,
+            commands::forgejo_commands::forgejo_connect,
+            commands::forgejo_commands::forgejo_disconnect,
+            commands::forgejo_commands::forgejo_update_scope,
+            commands::forgejo_commands::forgejo_list_inbox_items,
+            commands::forgejo_commands::forgejo_search_issues,
+            commands::forgejo_commands::forgejo_get_issue,
+            commands::featurebase_commands::featurebase_connections,
+            commands::featurebase_commands::featurebase_connect,
+            commands::featurebase_commands::featurebase_disconnect,
+            commands::featurebase_commands::featurebase_list_inbox_items,
+            commands::featurebase_commands::featurebase_search_issues,
+            commands::featurebase_commands::featurebase_get_issue,
+            commands::plain_commands::plain_connections,
+            commands::plain_commands::plain_connect,
+            commands::plain_commands::plain_disconnect,
+            commands::plain_commands::plain_list_inbox_items,
+            commands::plain_commands::plain_search_issues,
+            commands::plain_commands::plain_get_issue,
             commands::slack_commands::slack_import_from_desktop,
             commands::slack_commands::slack_list_workspaces,
             commands::slack_commands::slack_disconnect_workspace,
@@ -820,7 +769,23 @@ pub fn run() {
             commands::companion_commands::companion_revoke_device,
             commands::companion_commands::companion_sign_in_cloudflare,
             commands::companion_commands::companion_allocate_stable_url,
-            commands::companion_commands::companion_destroy_stable_url
+            commands::companion_commands::companion_destroy_stable_url,
+            commands::library_commands::library_prompts_list,
+            commands::library_commands::library_prompts_upsert,
+            commands::library_commands::library_prompts_delete,
+            commands::library_commands::library_prompts_reorder,
+            commands::library_commands::library_mcp_list,
+            commands::library_commands::library_mcp_upsert,
+            commands::library_commands::library_mcp_delete,
+            commands::library_commands::library_mcp_sync_preview,
+            commands::library_commands::library_mcp_sync,
+            commands::library_commands::library_mcp_test,
+            commands::library_commands::library_skills_list,
+            commands::library_commands::library_skills_read,
+            commands::library_commands::library_skills_create,
+            commands::library_commands::library_skills_install,
+            commands::library_commands::library_skills_update,
+            commands::library_commands::library_skills_delete
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

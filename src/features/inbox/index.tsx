@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { ChangeEvent } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { GithubBrandIcon, GitlabBrandIcon } from "@/components/brand-icon";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
 import { Button } from "@/components/ui/button";
@@ -40,11 +41,16 @@ import {
 	InboxActionMenuButton,
 	InboxSearchField,
 } from "./actions";
+import { FeaturebaseInboxSection } from "./featurebase-inbox-section";
+import { ForgejoInboxSection } from "./forgejo-inbox-section";
+import { JiraInboxSection } from "./jira-inbox-section";
 import { InboxSourceLayout } from "./layout";
 import { LinearInboxSection } from "./linear-inbox-section";
+import { PlainInboxSection } from "./plain-inbox-section";
 import { SlackInboxSection } from "./slack-inbox-section";
 import { SourceCard } from "./source-card";
 import { SourceIcon } from "./source-icon";
+import { TrelloInboxSection } from "./trello-inbox-section";
 import { useDebouncedValue } from "./use-debounced-value";
 import {
 	type InboxItemWithDetailRef,
@@ -56,8 +62,18 @@ import {
  *  narrow `repository.forgeProvider` (which can also be "unknown"). */
 type ForgeFilterId = "github" | "gitlab";
 
-/** All non-forge providers stay as "Coming Soon" placeholders. */
-type ExternalFilterId = "linear" | "slack" | "mobile";
+/** Non-forge providers. Linear / Jira / Trello / Forgejo / Featurebase /
+ *  Plain / Slack have real sections; Mobile remains a "Coming Soon"
+ *  placeholder. */
+type ExternalFilterId =
+	| "linear"
+	| "jira"
+	| "trello"
+	| "forgejo"
+	| "featurebase"
+	| "plain"
+	| "slack"
+	| "mobile";
 
 type SourceFilterId = ForgeFilterId | ExternalFilterId;
 
@@ -89,13 +105,22 @@ type ForgeStateFilterId =
 
 type ForgeStateFilter = {
 	id: ForgeStateFilterId;
-	/** Generic state-filter copy — same wording across providers, so it
-	 *  can stay in frontend. Provider-differentiated copy (PR vs MR)
-	 *  comes from `inboxKindLabelsQueryOptions` instead. */
-	label: string;
+	/** i18n key for the generic state-filter copy — same wording across
+	 *  providers, so it can stay in frontend. Provider-differentiated copy
+	 *  (PR vs MR) comes from `inboxKindLabelsQueryOptions` instead. */
+	labelKey: string;
 };
 
-const EXTERNAL_FILTER_IDS: ExternalFilterId[] = ["slack", "linear", "mobile"];
+const EXTERNAL_FILTER_IDS: ExternalFilterId[] = [
+	"slack",
+	"linear",
+	"jira",
+	"trello",
+	"forgejo",
+	"featurebase",
+	"plain",
+	"mobile",
+];
 
 /** If the user pastes a GitHub or GitLab issue/PR/MR URL into the
  *  search box, snap the sub-tab to the matching kind so the result
@@ -125,9 +150,9 @@ function forgeUrlToInboxKind(query: string): InboxKind | null {
  *  remains here. Partial so the map only carries providers still pending. */
 const COMING_SOON_COPY: Partial<Record<ExternalFilterId, string[]>> = {
 	mobile: [
-		"Send tasks, links, and screenshots from your phone.",
-		"Keep lightweight review and triage flows in sync.",
-		"Hand off mobile-captured context to desktop agents.",
+		"comingSoon.mobile.line1",
+		"comingSoon.mobile.line2",
+		"comingSoon.mobile.line3",
 	],
 };
 
@@ -138,20 +163,20 @@ const COMING_SOON_COPY: Partial<Record<ExternalFilterId, string[]>> = {
  *  via `inboxKindLabelsQueryOptions`. */
 const FORGE_STATE_FILTERS: Record<InboxKind, ForgeStateFilter[]> = {
 	issues: [
-		{ id: "all", label: "All" },
-		{ id: "open", label: "Open" },
-		{ id: "closed", label: "Closed" },
+		{ id: "all", labelKey: "stateFilter.all" },
+		{ id: "open", labelKey: "stateFilter.open" },
+		{ id: "closed", labelKey: "stateFilter.closed" },
 	],
 	prs: [
-		{ id: "all", label: "All" },
-		{ id: "open", label: "Open" },
-		{ id: "closed", label: "Closed" },
-		{ id: "merged", label: "Merged" },
+		{ id: "all", labelKey: "stateFilter.all" },
+		{ id: "open", labelKey: "stateFilter.open" },
+		{ id: "closed", labelKey: "stateFilter.closed" },
+		{ id: "merged", labelKey: "stateFilter.merged" },
 	],
 	discussions: [
-		{ id: "all", label: "All" },
-		{ id: "answered", label: "Answered" },
-		{ id: "unanswered", label: "Unanswered" },
+		{ id: "all", labelKey: "stateFilter.all" },
+		{ id: "answered", labelKey: "stateFilter.answered" },
+		{ id: "unanswered", labelKey: "stateFilter.unanswered" },
 	],
 };
 
@@ -236,6 +261,7 @@ export const InboxSidebar = memo(function InboxSidebar({
 	stateFilterBySource?: Record<string, string>;
 	onStateFilterBySourceChange?: (filters: Record<string, string>) => void;
 }) {
+	const { t } = useTranslation("inbox");
 	const projectForgeId = forgeFilterIdForRepo(repository ?? null);
 	const visibleSourceFilters = useMemo<SourceFilterId[]>(
 		() => [projectForgeId, ...EXTERNAL_FILTER_IDS],
@@ -439,14 +465,16 @@ export const InboxSidebar = memo(function InboxSidebar({
 				value={searchQuery}
 				onChange={handleSearchChange}
 				onClear={() => setSearchQuery("")}
-				ariaLabel={`Search ${activeForgeLabels.providerName} contexts`}
+				ariaLabel={t("search.forgeAriaLabel", {
+					provider: activeForgeLabels.providerName,
+				})}
 			/>
 
 			{showForgeTypeSelect && activeKindLabels ? (
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<InboxActionIconButton
-							aria-label={`Filter by ${activeKindLabels.short}`}
+							aria-label={t("filter.byKind", { kind: activeKindLabels.short })}
 							title={activeKindLabels.short}
 						>
 							{(() => {
@@ -493,7 +521,7 @@ export const InboxSidebar = memo(function InboxSidebar({
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<InboxActionMenuButton>
-						<span>{activeStateFilter.label}</span>
+						<span>{t(activeStateFilter.labelKey)}</span>
 						<ChevronDown className="size-3" strokeWidth={2} />
 					</InboxActionMenuButton>
 				</DropdownMenuTrigger>
@@ -510,7 +538,7 @@ export const InboxSidebar = memo(function InboxSidebar({
 								value={filter.id}
 								className="text-mini"
 							>
-								{filter.label}
+								{t(filter.labelKey)}
 							</DropdownMenuRadioItem>
 						))}
 					</DropdownMenuRadioGroup>
@@ -557,9 +585,19 @@ export const InboxSidebar = memo(function InboxSidebar({
 								? forgeLabelsFor(filterId).providerName
 								: filterId === "linear"
 									? "Linear"
-									: filterId === "slack"
-										? "Slack"
-										: "Mobile";
+									: filterId === "jira"
+										? "Jira"
+										: filterId === "trello"
+											? "Trello"
+											: filterId === "forgejo"
+												? "Forgejo"
+												: filterId === "featurebase"
+													? "Featurebase"
+													: filterId === "plain"
+														? "Plain"
+														: filterId === "slack"
+															? "Slack"
+															: "Mobile";
 						return (
 							<button
 								key={filterId}
@@ -584,6 +622,31 @@ export const InboxSidebar = memo(function InboxSidebar({
 									) : filterId === "slack" ? (
 										<SourceIcon
 											source="slack_thread"
+											size={providerTabsCompact ? 13 : 14}
+										/>
+									) : filterId === "jira" ? (
+										<SourceIcon
+											source="jira"
+											size={providerTabsCompact ? 13 : 14}
+										/>
+									) : filterId === "trello" ? (
+										<SourceIcon
+											source="trello"
+											size={providerTabsCompact ? 13 : 14}
+										/>
+									) : filterId === "forgejo" ? (
+										<SourceIcon
+											source="forgejo"
+											size={providerTabsCompact ? 13 : 14}
+										/>
+									) : filterId === "featurebase" ? (
+										<SourceIcon
+											source="featurebase"
+											size={providerTabsCompact ? 13 : 14}
+										/>
+									) : filterId === "plain" ? (
+										<SourceIcon
+											source="plain"
 											size={providerTabsCompact ? 13 : 14}
 										/>
 									) : filterId === "mobile" ? (
@@ -618,6 +681,41 @@ export const InboxSidebar = memo(function InboxSidebar({
 					appendContextTarget={appendContextTarget}
 					horizontalPaddingClass={horizontalPaddingClass}
 				/>
+			) : selectedSource === "jira" ? (
+				<JiraInboxSection
+					onOpenCard={onOpenCard}
+					selectedCardId={selectedCardId}
+					appendContextTarget={appendContextTarget}
+					horizontalPaddingClass={horizontalPaddingClass}
+				/>
+			) : selectedSource === "trello" ? (
+				<TrelloInboxSection
+					onOpenCard={onOpenCard}
+					selectedCardId={selectedCardId}
+					appendContextTarget={appendContextTarget}
+					horizontalPaddingClass={horizontalPaddingClass}
+				/>
+			) : selectedSource === "forgejo" ? (
+				<ForgejoInboxSection
+					onOpenCard={onOpenCard}
+					selectedCardId={selectedCardId}
+					appendContextTarget={appendContextTarget}
+					horizontalPaddingClass={horizontalPaddingClass}
+				/>
+			) : selectedSource === "featurebase" ? (
+				<FeaturebaseInboxSection
+					onOpenCard={onOpenCard}
+					selectedCardId={selectedCardId}
+					appendContextTarget={appendContextTarget}
+					horizontalPaddingClass={horizontalPaddingClass}
+				/>
+			) : selectedSource === "plain" ? (
+				<PlainInboxSection
+					onOpenCard={onOpenCard}
+					selectedCardId={selectedCardId}
+					appendContextTarget={appendContextTarget}
+					horizontalPaddingClass={horizontalPaddingClass}
+				/>
 			) : (
 				<InboxSourceLayout
 					ref={scrollContainerRef}
@@ -632,7 +730,9 @@ export const InboxSidebar = memo(function InboxSidebar({
 										className="inbox-coming-soon-pickaxe size-3.5 shrink-0"
 										strokeWidth={2}
 									/>
-									<span className="text-ui font-medium">Coming Soon</span>
+									<span className="text-ui font-medium">
+										{t("comingSoon.title")}
+									</span>
 								</div>
 								<div className="my-7 flex items-center gap-2 px-2">
 									<div className="h-px flex-1 bg-border" />
@@ -642,8 +742,8 @@ export const InboxSidebar = memo(function InboxSidebar({
 								<ul className="list-disc space-y-3 pl-4 text-left text-pretty text-mini leading-4 marker:text-muted-foreground/35">
 									{(
 										COMING_SOON_COPY[selectedSource as ExternalFilterId] ?? []
-									).map((line) => (
-										<li key={line}>{line}</li>
+									).map((lineKey) => (
+										<li key={lineKey}>{t(lineKey)}</li>
 									))}
 								</ul>
 							</div>
@@ -719,10 +819,11 @@ export const InboxSidebar = memo(function InboxSidebar({
 });
 
 function InboxLoadingState() {
+	const { t } = useTranslation("inbox");
 	return (
 		<div className="mt-8 flex flex-col items-center gap-2 px-6 text-muted-foreground/70">
 			<Loader2 className="size-4 animate-spin" strokeWidth={2} />
-			<div className="text-small leading-5">Loading items…</div>
+			<div className="text-small leading-5">{t("loading.items")}</div>
 		</div>
 	);
 }
@@ -734,11 +835,13 @@ function InboxErrorState({
 	error: unknown;
 	onRetry: () => void;
 }) {
-	const message =
-		error instanceof Error ? error.message : "Couldn't load context items.";
+	const { t } = useTranslation("inbox");
+	const message = error instanceof Error ? error.message : t("error.fallback");
 	return (
 		<div className="mt-8 flex flex-col items-center gap-2 px-6 text-center">
-			<div className="text-ui font-medium text-foreground">Couldn't load</div>
+			<div className="text-ui font-medium text-foreground">
+				{t("error.title")}
+			</div>
 			<div className="text-small leading-5 text-muted-foreground">
 				{message}
 			</div>
@@ -749,7 +852,7 @@ function InboxErrorState({
 				onClick={onRetry}
 				className="mt-1 cursor-interactive text-small"
 			>
-				Try again
+				{t("error.tryAgain")}
 			</Button>
 		</div>
 	);
@@ -852,6 +955,7 @@ function parseExternalRepo(externalId: string): string {
 }
 
 function ConfigureInboxLink({ onClick }: { onClick: () => void }) {
+	const { t } = useTranslation("inbox");
 	return (
 		<button
 			type="button"
@@ -862,7 +966,7 @@ function ConfigureInboxLink({ onClick }: { onClick: () => void }) {
 			)}
 		>
 			<SlidersHorizontal className="size-3" strokeWidth={2} />
-			Configure
+			{t("configure")}
 		</button>
 	);
 }
@@ -878,6 +982,7 @@ function ConnectForgeState({
 	provider: ForgeFilterId;
 	onConfigure: () => void;
 }) {
+	const { t } = useTranslation("inbox");
 	const labels = forgeLabelsFor(provider);
 	return (
 		<div className="mt-8 flex flex-col items-center gap-2 px-6 text-center">
@@ -898,7 +1003,7 @@ function ConnectForgeState({
 				className="mt-1 cursor-interactive gap-1.5"
 			>
 				<SlidersHorizontal className="size-3.5" strokeWidth={2} />
-				Configure
+				{t("configure")}
 			</Button>
 		</div>
 	);
@@ -916,6 +1021,7 @@ function KindDisabledState({
 	labels: InboxKindLabels | null;
 	onConfigure: () => void;
 }) {
+	const { t } = useTranslation("inbox");
 	const plural = labels?.plural ?? "Items";
 	const lower = plural.toLowerCase();
 	return (
@@ -924,10 +1030,10 @@ function KindDisabledState({
 				<SlidersHorizontal className="size-4" strokeWidth={2} />
 			</div>
 			<div className="text-ui font-medium text-foreground">
-				{plural} are off
+				{t("connectForge.kindDisabledTitle", { plural })}
 			</div>
 			<div className="text-small leading-5 text-muted-foreground">
-				Turn {lower} back on in Contexts settings.
+				{t("connectForge.kindDisabledDescription", { lower })}
 			</div>
 			<Button
 				type="button"
@@ -937,7 +1043,7 @@ function KindDisabledState({
 				className="mt-1 cursor-interactive gap-1.5 text-small"
 			>
 				<SlidersHorizontal className="size-3.5" strokeWidth={2} />
-				Configure
+				{t("configure")}
 			</Button>
 		</div>
 	);
@@ -953,8 +1059,11 @@ function NoItemsState({
 	labels: InboxKindLabels | null;
 	repoFilter: string | null;
 }) {
+	const { t } = useTranslation("inbox");
 	const lower = (labels?.plural ?? "Items").toLowerCase();
-	const title = repoFilter ? `No ${lower} in ${repoFilter}` : `No ${lower} yet`;
+	const title = repoFilter
+		? t("empty.noItemsInRepo", { plural: lower, repo: repoFilter })
+		: t("empty.noItems", { plural: lower });
 	return (
 		<div className="mt-8 flex flex-col items-center gap-1 px-6 text-center">
 			<div className="text-small leading-5 text-muted-foreground/80">

@@ -7,6 +7,7 @@ import {
 	Volume2,
 } from "lucide-react";
 import { memo, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ModelIcon } from "@/components/model-icon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -43,6 +44,7 @@ import {
 	isConductorAvailable,
 	type RepositoryCreateOption,
 } from "@/lib/api";
+import { i18n } from "@/lib/i18n";
 import {
 	NOTIFICATION_SOUND_LABELS,
 	playNotificationSound,
@@ -75,7 +77,6 @@ import { LocalLlmPanel } from "./panels/local-llm";
 import { MobileCompanionPanel } from "./panels/mobile-companion";
 import { ProvidersPanel } from "./panels/providers";
 import { RepositorySettingsPanel } from "./panels/repository-settings";
-import { TriagePanel } from "./panels/triage";
 
 const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
 
@@ -88,41 +89,35 @@ export type { ContextProviderTab, SettingsSection } from "./types";
 
 import type { ContextProviderTab, SettingsSection } from "./types";
 
-/// Display labels for settings sections in the sidebar / dialog title.
-/// Most match the section key with a leading capital, but a few names
-/// don't pluralise nicely under that rule — keep the overrides explicit.
-const SECTION_LABEL_OVERRIDES: Partial<Record<SettingsSection, string>> = {
-	model: "Models",
-	account: "Accounts",
-	inbox: "Contexts",
-};
-
-/// Optional muted-caption next to the title in the dialog header.
+/// Sections whose caption surfaces a one-liner next to the dialog title.
 /// Lets a panel surface a one-liner without rendering its own header
 /// row (which otherwise duplicates the section name).
-const SECTION_TITLE_CAPTIONS: Partial<Record<SettingsSection, string>> = {
-	account: "Synced with your local gh / glab CLI.",
-	inbox: "Pick which items each connected account contributes to Contexts.",
-};
+const SECTIONS_WITH_CAPTION: SettingsSection[] = ["account", "inbox"];
+
+type SectionTranslate = ReturnType<typeof useTranslation>["t"];
 
 function sidebarSectionLabel(
 	section: SettingsSection,
 	repos: RepositoryCreateOption[],
+	t: SectionTranslate,
 ): string {
 	if (section.startsWith("repo:")) {
 		const repoId = section.slice(5);
-		return repos.find((r) => r.id === repoId)?.name ?? "Repository";
+		return (
+			repos.find((r) => r.id === repoId)?.name ?? t("nav.repositoryFallback")
+		);
 	}
-	const override = SECTION_LABEL_OVERRIDES[section];
-	if (override) return override;
-	return section.charAt(0).toUpperCase() + section.slice(1);
+	// Each fixed section has an explicit, human-curated label so the
+	// nav reads naturally in every locale (no capitalize-the-key hack).
+	return t(`nav.sections.${section}`);
 }
 
 function titleSectionLabel(
 	section: SettingsSection,
 	repos: RepositoryCreateOption[],
+	t: SectionTranslate,
 ): string {
-	return sidebarSectionLabel(section, repos);
+	return sidebarSectionLabel(section, repos, t);
 }
 
 export const SettingsDialog = memo(function SettingsDialog({
@@ -140,6 +135,7 @@ export const SettingsDialog = memo(function SettingsDialog({
 	initialInboxProvider?: ContextProviderTab;
 	onClose: () => void;
 }) {
+	const { t } = useTranslation(["settings", "common"]);
 	const { settings, updateSettings } = useSettings();
 	const queryClient = useQueryClient();
 	const [activeSection, setActiveSection] =
@@ -218,7 +214,7 @@ export const SettingsDialog = memo(function SettingsDialog({
 												isActive={activeSection === section}
 												onClick={() => setActiveSection(section)}
 											>
-												{sidebarSectionLabel(section, repositories)}
+												{sidebarSectionLabel(section, repositories, t)}
 											</SidebarMenuButton>
 										</SidebarMenuItem>
 									))}
@@ -230,7 +226,7 @@ export const SettingsDialog = memo(function SettingsDialog({
 							<>
 								<SidebarSeparator />
 								<SidebarGroup>
-									<SidebarGroupLabel>Repositories</SidebarGroupLabel>
+									<SidebarGroupLabel>{t("nav.repositories")}</SidebarGroupLabel>
 									<SidebarGroupContent>
 										<SidebarMenu>
 											{repositories.map((repo) => {
@@ -271,11 +267,11 @@ export const SettingsDialog = memo(function SettingsDialog({
 							<DialogTitle className="text-title font-semibold text-foreground">
 								{activeRepo
 									? activeRepo.name
-									: titleSectionLabel(activeSection, repositories)}
+									: titleSectionLabel(activeSection, repositories, t)}
 							</DialogTitle>
-							{!activeRepo && SECTION_TITLE_CAPTIONS[activeSection] ? (
+							{!activeRepo && SECTIONS_WITH_CAPTION.includes(activeSection) ? (
 								<span className="truncate text-small text-muted-foreground/70">
-									{SECTION_TITLE_CAPTIONS[activeSection]}
+									{t(`nav.captions.${activeSection}`)}
 								</span>
 							) : null}
 						</div>
@@ -288,8 +284,8 @@ export const SettingsDialog = memo(function SettingsDialog({
 							{activeSection === "general" && (
 								<SettingsGroup>
 									<SettingsRow
-										title="Desktop Notifications"
-										description="Show system notifications when sessions complete or need input"
+										title={t("general.notifications.title")}
+										description={t("general.notifications.description")}
 									>
 										<Switch
 											checked={settings.notifications}
@@ -299,8 +295,8 @@ export const SettingsDialog = memo(function SettingsDialog({
 										/>
 									</SettingsRow>
 									<SettingsRow
-										title="Notification sound"
-										description="Play a sound when a desktop notification fires"
+										title={t("general.notificationSound.title")}
+										description={t("general.notificationSound.description")}
 									>
 										<div className="flex items-center gap-1.5">
 											<SettingsSelect<NotificationSound>
@@ -310,13 +306,13 @@ export const SettingsDialog = memo(function SettingsDialog({
 													updateSettings({ notificationSound: next })
 												}
 												disabled={!settings.notifications}
-												ariaLabel="Notification sound"
+												ariaLabel={t("general.notificationSound.aria")}
 											/>
 											<Button
 												type="button"
 												variant="ghost"
 												size="icon"
-												aria-label="Test notification sound"
+												aria-label={t("general.notificationSound.testAria")}
 												className="size-8"
 												disabled={
 													!settings.notifications ||
@@ -334,8 +330,10 @@ export const SettingsDialog = memo(function SettingsDialog({
 										</div>
 									</SettingsRow>
 									<SettingsRow
-										title="Expand terminals on hover"
-										description="Enlarge inspector terminals when the cursor rests over them."
+										title={t("general.terminalHoverExpansion.title")}
+										description={t(
+											"general.terminalHoverExpansion.description",
+										)}
 									>
 										<Switch
 											checked={settings.terminalHoverExpansion}
@@ -345,9 +343,9 @@ export const SettingsDialog = memo(function SettingsDialog({
 										/>
 									</SettingsRow>
 									<SettingsRow
-										title="Terminal Mode"
+										title={t("general.terminalMode.title")}
 										releaseMarker={{ kind: "feature" }}
-										description="Adds a composer toggle that opens your prompt in the agent's terminal UI instead of a chat session. Claude and Codex only."
+										description={t("general.terminalMode.description")}
 									>
 										<Switch
 											checked={settings.enableTerminalMode}
@@ -357,8 +355,10 @@ export const SettingsDialog = memo(function SettingsDialog({
 										/>
 									</SettingsRow>
 									<SettingsRow
-										title="Always show context usage"
-										description="By default, context usage is only shown when more than 70% is used."
+										title={t("general.alwaysShowContextUsage.title")}
+										description={t(
+											"general.alwaysShowContextUsage.description",
+										)}
 									>
 										<Switch
 											checked={settings.alwaysShowContextUsage}
@@ -368,8 +368,8 @@ export const SettingsDialog = memo(function SettingsDialog({
 										/>
 									</SettingsRow>
 									<SettingsRow
-										title="Usage Stats"
-										description="Show account rate limits beside the composer."
+										title={t("general.usageStats.title")}
+										description={t("general.usageStats.description")}
 									>
 										<Switch
 											checked={settings.showUsageStats}
@@ -379,8 +379,8 @@ export const SettingsDialog = memo(function SettingsDialog({
 										/>
 									</SettingsRow>
 									<SettingsRow
-										title="Auto-archive on merge"
-										description="When a workspace's linked PR/MR is merged, archive the workspace automatically."
+										title={t("general.autoArchiveOnMerge.title")}
+										description={t("general.autoArchiveOnMerge.description")}
 									>
 										<Switch
 											checked={settings.autoArchiveOnMerge}
@@ -390,26 +390,32 @@ export const SettingsDialog = memo(function SettingsDialog({
 										/>
 									</SettingsRow>
 									<SettingsRow
-										title="Follow-up behavior"
+										title={t("general.followUpBehavior.title")}
 										description={
 											<>
-												Queue follow-ups while the agent runs or steer the
-												current run.
+												{t("general.followUpBehavior.description")}
 												{(() => {
 													const toggleHotkey = getShortcut(
 														settings.shortcuts,
 														"composer.toggleFollowUpBehavior",
 													);
 													if (!toggleHotkey) return null;
+													// Split the localized sentence around the |shortcut|
+													// marker so the live shortcut chip can render inline
+													// regardless of word order in each locale.
+													const [before, after] = t(
+														"general.followUpBehavior.pressToInvert",
+														{ shortcut: " " },
+													).split(" ");
 													return (
 														<>
 															{" "}
-															Press{" "}
+															{before}
 															<InlineShortcutDisplay
 																hotkey={toggleHotkey}
 																className="align-baseline text-muted-foreground"
-															/>{" "}
-															to do the opposite for one message.
+															/>
+															{after}
 														</>
 													);
 												})()}
@@ -428,24 +434,24 @@ export const SettingsDialog = memo(function SettingsDialog({
 										>
 											<ToggleGroupItem
 												value="queue"
-												aria-label="Queue"
+												aria-label={t("general.followUpBehavior.queue")}
 												className="h-7 rounded-md px-2.5 text-small font-medium text-muted-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground"
 											>
-												Queue
+												{t("general.followUpBehavior.queue")}
 											</ToggleGroupItem>
 											<ToggleGroupItem
 												value="steer"
-												aria-label="Steer"
+												aria-label={t("general.followUpBehavior.steer")}
 												className="h-7 rounded-md px-2.5 text-small font-medium text-muted-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground"
 											>
-												Steer
+												{t("general.followUpBehavior.steer")}
 											</ToggleGroupItem>
 										</ToggleGroup>
 									</SettingsRow>
 									<SettingsRow
 										title={
 											<span className="inline-flex items-center gap-1.5">
-												Claude Code Thinking Display
+												{t("general.claudeThinking.title")}
 												{/* SettingsDialog renders outside AppShell's
 												 *  TooltipProvider tree, so panels need their
 												 *  own — same pattern as repository-settings /
@@ -465,17 +471,25 @@ export const SettingsDialog = memo(function SettingsDialog({
 															<div className="space-y-1.5">
 																<div>
 																	<span className="font-medium">
-																		Summarized
+																		{t(
+																			"general.claudeThinking.tooltip.summarizedLabel",
+																		)}
 																	</span>
 																	{" — "}
-																	thinking blocks contain summarized text.
+																	{t(
+																		"general.claudeThinking.tooltip.summarizedBody",
+																	)}
 																</div>
 																<div>
-																	<span className="font-medium">Omitted</span>
+																	<span className="font-medium">
+																		{t(
+																			"general.claudeThinking.tooltip.omittedLabel",
+																		)}
+																	</span>
 																	{" — "}
-																	thinking blocks are empty. The server skips
-																	streaming thinking tokens, so the final text
-																	streams sooner. Reduces latency, not cost.
+																	{t(
+																		"general.claudeThinking.tooltip.omittedBody",
+																	)}
 																</div>
 															</div>
 														</TooltipContent>
@@ -483,7 +497,7 @@ export const SettingsDialog = memo(function SettingsDialog({
 												</TooltipProvider>
 											</span>
 										}
-										description="Controls how Claude Code returns thinking content."
+										description={t("general.claudeThinking.description")}
 									>
 										<ToggleGroup
 											type="single"
@@ -500,17 +514,17 @@ export const SettingsDialog = memo(function SettingsDialog({
 										>
 											<ToggleGroupItem
 												value="summarized"
-												aria-label="Summarized"
+												aria-label={t("general.claudeThinking.summarized")}
 												className="h-7 rounded-md px-2.5 text-small font-medium text-muted-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground"
 											>
-												Summarized
+												{t("general.claudeThinking.summarized")}
 											</ToggleGroupItem>
 											<ToggleGroupItem
 												value="omitted"
-												aria-label="Omitted"
+												aria-label={t("general.claudeThinking.omitted")}
 												className="h-7 rounded-md px-2.5 text-small font-medium text-muted-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground"
 											>
-												Omitted
+												{t("general.claudeThinking.omitted")}
 											</ToggleGroupItem>
 										</ToggleGroup>
 									</SettingsRow>
@@ -537,8 +551,8 @@ export const SettingsDialog = memo(function SettingsDialog({
 							{activeSection === "model" && (
 								<SettingsGroup>
 									<ModelSettingRow
-										title="Default model"
-										description="Model for new chats"
+										title={t("model.default.title")}
+										description={t("model.default.description")}
 										models={allModels}
 										modelSections={modelSections}
 										isLoadingModels={modelSectionsQuery.isPending}
@@ -563,8 +577,8 @@ export const SettingsDialog = memo(function SettingsDialog({
 										}}
 									/>
 									<ModelSettingRow
-										title="Review model"
-										description="Model for code review"
+										title={t("model.review.title")}
+										description={t("model.review.description")}
 										models={allModels}
 										modelSections={modelSections}
 										isLoadingModels={modelSectionsQuery.isPending}
@@ -585,8 +599,8 @@ export const SettingsDialog = memo(function SettingsDialog({
 										}}
 									/>
 									<ModelSettingRow
-										title="Action model"
-										description="Model for PRs/MRs and commit-and-push"
+										title={t("model.action.title")}
+										description={t("model.action.description")}
 										models={allModels}
 										modelSections={modelSections}
 										isLoadingModels={modelSectionsQuery.isPending}
@@ -614,7 +628,6 @@ export const SettingsDialog = memo(function SettingsDialog({
 										settings={settings}
 										updateSettings={updateSettings}
 									/>
-									{settings.localLlm.enabled ? <TriagePanel /> : null}
 									<MobileCompanionPanel />
 								</SettingsGroup>
 							)}
@@ -670,8 +683,15 @@ export const SettingsDialog = memo(function SettingsDialog({
 // Shared sub-components
 // ---------------------------------------------------------------------------
 
+/// Effort levels come from live model metadata, so the set isn't closed.
+/// Known levels (low/medium/high/xhigh) get curated translations; anything
+/// else falls back to a capitalized raw value so a new backend level still
+/// renders sensibly.
 function effortLabel(level: string): string {
-	if (level === "xhigh") return "Extra High";
+	const known = ["low", "medium", "high", "xhigh"];
+	if (known.includes(level)) {
+		return i18n.t(`settings:model.effort.${level}`);
+	}
 	return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
@@ -709,6 +729,7 @@ function ModelSettingRow({
 	ariaPrefix: string;
 	onChange: (patch: ModelRowChange) => void;
 }) {
+	const { t } = useTranslation(["settings", "common"]);
 	const selected = findModelOption(modelSections, modelId);
 	// Key off real model metadata — Haiku reports `effortLevels: []`, and
 	// the wire format may also drop the field entirely when empty. Either
@@ -720,7 +741,8 @@ function ModelSettingRow({
 		: FALLBACK_EFFORT_LEVELS;
 	const supportsFastMode = selected?.supportsFastMode === true;
 	const label =
-		selected?.label ?? (isLoadingModels ? "Loading…" : "Select model");
+		selected?.label ??
+		(isLoadingModels ? t("common:state.loading") : t("model.selectModel"));
 	const displayEffort = effort ?? "high";
 
 	// Auto-clamp effort when model changes — but only after model metadata
@@ -816,13 +838,13 @@ function ModelSettingRow({
 								: "text-ui text-muted-foreground"
 						}
 					>
-						Fast mode
+						{t("model.fastMode")}
 					</span>
 					<Switch
 						checked={supportsFastMode && fastMode}
 						disabled={!supportsFastMode}
 						onCheckedChange={(checked) => onChange({ fastMode: checked })}
-						aria-label={`${ariaPrefix} fast mode`}
+						aria-label={t("model.fastModeAria", { prefix: ariaPrefix })}
 					/>
 				</div>
 			</div>
@@ -837,6 +859,7 @@ export function SettingsButton({
 	onClick: () => void;
 	shortcut?: string | null;
 }) {
+	const { t } = useTranslation("settings");
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -854,7 +877,7 @@ export function SettingsButton({
 				sideOffset={4}
 				className="flex h-[24px] items-center gap-2 rounded-md px-2 text-small leading-none"
 			>
-				<span className="leading-none">Settings</span>
+				<span className="leading-none">{t("nav.settings")}</span>
 				{shortcut ? (
 					<InlineShortcutDisplay
 						hotkey={shortcut}

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ClaudeIcon, OpenAIIcon } from "@/components/icons";
 import {
 	HoverCard,
@@ -38,6 +39,7 @@ const HOVER_OPEN_DELAY_MS = 180;
 const HOVER_CLOSE_DELAY_MS = 80;
 
 export function UsageStatsIndicator({ agentType, disabled, className }: Props) {
+	const { t } = useTranslation("composer");
 	const { settings, updateSettings } = useSettings();
 	const [open, setOpen] = useState(false);
 	const queryClient = useQueryClient();
@@ -100,7 +102,7 @@ export function UsageStatsIndicator({ agentType, disabled, className }: Props) {
 				<button
 					type="button"
 					disabled={disabled}
-					aria-label="Usage Stats"
+					aria-label={t("usageStats.aria")}
 					className={cn(
 						"flex size-7 cursor-interactive items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-50",
 						className,
@@ -130,7 +132,7 @@ export function UsageStatsIndicator({ agentType, disabled, className }: Props) {
 								<Tooltip>
 									<TooltipTrigger asChild>
 										<div className="text-body font-semibold text-foreground cursor-help">
-											Usage Stats
+											{t("usageStats.title")}
 										</div>
 									</TooltipTrigger>
 									<TooltipContent

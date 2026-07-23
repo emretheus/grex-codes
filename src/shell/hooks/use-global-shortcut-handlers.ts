@@ -100,6 +100,10 @@ export function useGlobalShortcutHandlers({
 				callback: handleOpenSettings,
 			},
 			{
+				id: "library.open" as const,
+				callback: () => publishShellEvent({ type: "open-library" }),
+			},
+			{
 				id: "workspace.copyPath" as const,
 				callback: handleCopyWorkspacePath,
 				enabled: Boolean(workspaceRootPath),
@@ -261,7 +265,8 @@ export function useGlobalShortcutHandlers({
 			{
 				id: "composer.openModelPicker" as const,
 				callback: handleOpenModelPicker,
-				enabled: workspaceViewMode === "conversation",
+				enabled:
+					workspaceViewMode === "conversation" || workspaceViewMode === "start",
 			},
 			{
 				id: "editor.edit" as const,

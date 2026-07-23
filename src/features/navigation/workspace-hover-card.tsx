@@ -17,6 +17,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { GrexThinkingIndicator } from "@/components/grex-thinking-indicator";
 import {
 	LazyStreamdown,
@@ -27,11 +28,12 @@ import {
 	HoverCard as HoverCardRoot,
 	HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import type {
-	ExtendedMessagePart,
-	ThreadMessageLike,
-	WorkspaceRow,
-	WorkspaceSessionSummary,
+import {
+	type ExtendedMessagePart,
+	type ThreadMessageLike,
+	type WorkspaceRow,
+	type WorkspaceSessionSummary,
+	workspaceModeHasGitContext,
 } from "@/lib/api";
 import {
 	workspaceGitActionStatusQueryOptions,
@@ -91,6 +93,7 @@ function CompactStat({
 
 /** Compact git status: chips when dirty, single green icon when clean. */
 function GitStats({ workspaceId }: { workspaceId: string }) {
+	const { t } = useTranslation("navigation");
 	const { data, isLoading, isError } = useQuery(
 		workspaceGitActionStatusQueryOptions(workspaceId),
 	);
@@ -108,7 +111,7 @@ function GitStats({ workspaceId }: { workspaceId: string }) {
 				key="uncommitted"
 				icon={FileDiff}
 				value={String(uncommitted)}
-				label={`${uncommitted} uncommitted change${uncommitted === 1 ? "" : "s"}`}
+				label={t("hoverCard.uncommittedChanges", { count: uncommitted })}
 				tone="warning"
 			/>,
 		);
@@ -119,7 +122,7 @@ function GitStats({ workspaceId }: { workspaceId: string }) {
 				key="behind"
 				icon={ArrowDown}
 				value={String(behind)}
-				label={`${behind} commit${behind === 1 ? "" : "s"} behind ${targetLabel}`}
+				label={t("hoverCard.commitsBehind", { count: behind, targetLabel })}
 				tone="danger"
 			/>,
 		);
@@ -130,7 +133,7 @@ function GitStats({ workspaceId }: { workspaceId: string }) {
 				key="ahead"
 				icon={ArrowUp}
 				value={String(ahead)}
-				label={`${ahead} unpushed commit${ahead === 1 ? "" : "s"}`}
+				label={t("hoverCard.unpushedCommits", { count: ahead })}
 				tone="default"
 			/>,
 		);
@@ -140,8 +143,8 @@ function GitStats({ workspaceId }: { workspaceId: string }) {
 		return (
 			<span
 				className="inline-flex shrink-0 items-center"
-				title={`Branch up to date with ${targetLabel} · no uncommitted changes`}
-				aria-label={`Branch up to date with ${targetLabel}`}
+				title={t("hoverCard.upToDateClean", { targetLabel })}
+				aria-label={t("hoverCard.upToDate", { targetLabel })}
 			>
 				<GitBranch className="size-3 text-emerald-500/90" strokeWidth={2} />
 			</span>
@@ -289,6 +292,7 @@ function StreamingElapsed({
 	workspaceId: string;
 	primarySessionId: string | null | undefined;
 }) {
+	const { t } = useTranslation("navigation");
 	const queryClient = useQueryClient();
 	const busySessionIds = useBusySessionIds();
 	const { data: workspaceSessions } = useQuery(
@@ -343,8 +347,10 @@ function StreamingElapsed({
 	return (
 		<span
 			className="mt-0.5 shrink-0 font-mono text-micro tabular-nums text-muted-foreground/80"
-			title={`Running for ${formatElapsed(elapsed)}`}
-			aria-label={`Running for ${formatElapsed(elapsed)}`}
+			title={t("hoverCard.runningFor", { elapsed: formatElapsed(elapsed) })}
+			aria-label={t("hoverCard.runningFor", {
+				elapsed: formatElapsed(elapsed),
+			})}
 		>
 			{formatElapsed(elapsed)}
 		</span>
@@ -381,6 +387,7 @@ function LiveSessionPreview({
 	workspaceId: string;
 	primarySessionId: string | null | undefined;
 }) {
+	const { t } = useTranslation("navigation");
 	const queryClient = useQueryClient();
 	const busySessionIds = useBusySessionIds();
 
@@ -417,7 +424,7 @@ function LiveSessionPreview({
 	if (blocks.length === 0) {
 		return (
 			<span className="text-mini italic text-muted-foreground/70">
-				Thinking…
+				{t("hoverCard.thinking")}
 			</span>
 		);
 	}
@@ -500,6 +507,7 @@ export function WorkspaceHoverCard({
 	isSending?: boolean;
 	children: React.ReactNode;
 }) {
+	const { t } = useTranslation("navigation");
 	// Measured on open so the card's left edge snaps to the sidebar divider.
 	const [sideOffset, setSideOffset] = useState(HOVER_CARD_DEFAULT_SIDE_OFFSET);
 	const [open, setOpen] = useState(false);
@@ -614,10 +622,10 @@ export function WorkspaceHoverCard({
 		row.lastUserMessageAt ?? row.updatedAt ?? row.createdAt ?? null;
 	const lastActivity = relativeTime(lastActivityIso);
 	const lastActivityLabel = row.lastUserMessageAt
-		? "Last message"
+		? t("hoverCard.lastActivity.lastMessage")
 		: row.updatedAt
-			? "Last changed"
-			: "Created";
+			? t("hoverCard.lastActivity.lastChanged")
+			: t("hoverCard.lastActivity.created");
 	const createdAt = relativeTime(row.createdAt);
 	const sessionCount = row.sessionCount ?? 0;
 
@@ -657,10 +665,10 @@ export function WorkspaceHoverCard({
 								</span>
 							) : null}
 						</div>
-						{/* Chat workspaces have no git context and no workspace
-						 *  status — the entire right-side cluster (branch +
-						 *  diff chips + status dot) is meaningless for them. */}
-						{row.mode !== "chat" ? (
+						{/* Chat and non-git workspaces have no git context and no
+						 *  workspace status — the entire right-side cluster (branch
+						 *  + diff chips + status dot) is meaningless for them. */}
+						{workspaceModeHasGitContext(row.mode) ? (
 							<div className="mt-0.5 flex shrink-0 items-center gap-2">
 								<GitStats workspaceId={row.id} />
 								<span
@@ -711,7 +719,7 @@ export function WorkspaceHoverCard({
 						<div className="flex items-center gap-2.5">
 							{sessionCount > 0 ? (
 								<span className="tabular-nums">
-									{sessionCount} {sessionCount === 1 ? "session" : "sessions"}
+									{t("hoverCard.sessionCount", { count: sessionCount })}
 								</span>
 							) : null}
 						</div>
@@ -719,7 +727,10 @@ export function WorkspaceHoverCard({
 							<span
 								title={
 									createdAt
-										? `${lastActivityLabel} · created ${createdAt}`
+										? t("hoverCard.lastActivityCreated", {
+												lastActivityLabel,
+												createdAt,
+											})
 										: lastActivityLabel
 								}
 							>

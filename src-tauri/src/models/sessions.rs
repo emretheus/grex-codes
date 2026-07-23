@@ -38,6 +38,13 @@ pub struct WorkspaceSessionSummary {
 
 pub fn list_workspace_sessions(workspace_id: &str) -> Result<Vec<WorkspaceSessionSummary>> {
     let connection = db::read_conn()?;
+    list_workspace_sessions_with_connection(&connection, workspace_id)
+}
+
+fn list_workspace_sessions_with_connection(
+    connection: &rusqlite::Connection,
+    workspace_id: &str,
+) -> Result<Vec<WorkspaceSessionSummary>> {
     let active_session_id: Option<String> = connection.query_row(
         "SELECT active_session_id FROM workspaces WHERE id = ?1",
         [workspace_id],
@@ -65,7 +72,27 @@ pub fn list_workspace_sessions(workspace_id: &str) -> Result<Vec<WorkspaceSessio
               s.action_kind,
               s.session_kind
             FROM sessions s
-            WHERE s.workspace_id = ?1 AND COALESCE(s.is_hidden, 0) = 0
+            WHERE s.workspace_id = ?1
+              AND (
+                COALESCE(s.is_hidden, 0) = 0
+                -- Fallback: when the workspace has NO visible sessions left
+                -- (e.g. all were auto-closed after an in-review transition),
+                -- still surface the single most-recent session — even though
+                -- it is hidden — so the panel shows that conversation instead
+                -- of stranding on the "No session selected" dead-end.
+                OR (
+                  NOT EXISTS (
+                    SELECT 1 FROM sessions v
+                    WHERE v.workspace_id = ?1 AND COALESCE(v.is_hidden, 0) = 0
+                  )
+                  AND s.id = (
+                    SELECT s3.id FROM sessions s3
+                    WHERE s3.workspace_id = ?1
+                    ORDER BY datetime(s3.created_at) DESC, s3.id DESC
+                    LIMIT 1
+                  )
+                )
+              )
             ORDER BY
               datetime(s.created_at) ASC
             "#,
@@ -547,6 +574,10 @@ pub struct CreateSessionOverrides<'a> {
     /// Pin `agent_type` at creation. Terminal sessions store their preset CLI
     /// here; GUI sessions leave it null until the first send sets it.
     pub agent_type: Option<&'a str>,
+    /// Skip repointing the workspace's `active_session_id` to the new session.
+    /// Background creators (automation `workspace`-mode runs) set this so a
+    /// scheduled run never steals the focus the user left on another session.
+    pub skip_active_session: bool,
 }
 
 pub fn create_session(
@@ -621,16 +652,21 @@ pub fn create_session(
         )
         .context("Failed to create session")?;
 
-    // Set as active session on the workspace
-    let updated_rows = transaction
-        .execute(
-            "UPDATE workspaces SET active_session_id = ?1 WHERE id = ?2",
-            (&session_id, workspace_id),
-        )
-        .context("Failed to set active session")?;
+    // Set as active session on the workspace — unless the caller opted out
+    // (background automation runs keep the user's current selection).
+    if !overrides.skip_active_session {
+        let updated_rows = transaction
+            .execute(
+                "UPDATE workspaces SET active_session_id = ?1 WHERE id = ?2",
+                (&session_id, workspace_id),
+            )
+            .context("Failed to set active session")?;
 
-    if updated_rows != 1 {
-        bail!("Active session update affected {updated_rows} rows for workspace {workspace_id}");
+        if updated_rows != 1 {
+            bail!(
+                "Active session update affected {updated_rows} rows for workspace {workspace_id}"
+            );
+        }
     }
 
     transaction
@@ -651,6 +687,28 @@ pub fn get_session_model(session_id: &str) -> Result<Option<String>> {
         )
         .with_context(|| format!("Failed to read model for session {session_id}"))?;
     Ok(model.filter(|s| !s.is_empty()))
+}
+
+/// (workspace_id, permission_mode) for dispatching a background turn into an
+/// existing session (automations). `Ok(None)` when the session row is gone —
+/// callers treat that as "target missing", not an error.
+pub fn get_session_workspace_and_permission(
+    session_id: &str,
+) -> Result<Option<(Option<String>, String)>> {
+    let conn = db::read_conn()?;
+    conn.query_row(
+        "SELECT workspace_id, permission_mode FROM sessions WHERE id = ?1",
+        [session_id],
+        |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?
+                    .unwrap_or_else(|| "default".to_string()),
+            ))
+        },
+    )
+    .optional()
+    .with_context(|| format!("Failed to read workspace+permission for session {session_id}"))
 }
 
 /// (model, agent_type) for a session — provider hint for `resolve_model`
@@ -904,6 +962,10 @@ pub fn delete_session(session_id: &str) -> Result<()> {
             [session_id],
         )
         .context("Failed to delete session plan state")?;
+    // Drop chat automations bound to this session (no FK; single-writer pool
+    // means we cascade inline within this transaction).
+    crate::models::automations::delete_automations_for_session(&transaction, session_id)
+        .context("Failed to delete session automations")?;
     transaction
         .execute("DELETE FROM sessions WHERE id = ?1", [session_id])
         .context("Failed to delete session")?;
@@ -1124,6 +1186,51 @@ mod tests {
             "INSERT INTO sessions (id, workspace_id, status, title, created_at, updated_at) VALUES ('s3', 'w1', 'idle', 'Third Session', '2026-01-03T00:00:00', '2026-01-03T00:00:00')",
             [],
         ).unwrap();
+    }
+
+    #[test]
+    fn list_workspace_sessions_excludes_hidden_when_a_visible_one_remains() {
+        let (conn, _dir) = test_db();
+        seed_two_sessions(&conn); // s1 (older), s2 (newer)
+        conn.execute("UPDATE sessions SET is_hidden = 1 WHERE id = 's2'", [])
+            .unwrap();
+
+        let sessions = list_workspace_sessions_with_connection(&conn, "w1").unwrap();
+        assert_eq!(
+            sessions.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["s1"],
+        );
+    }
+
+    #[test]
+    fn list_workspace_sessions_falls_back_to_latest_hidden_when_all_hidden() {
+        let (conn, _dir) = test_db();
+        seed_two_sessions(&conn); // s1 (older), s2 (newer)
+        conn.execute(
+            "UPDATE sessions SET is_hidden = 1 WHERE workspace_id = 'w1'",
+            [],
+        )
+        .unwrap();
+
+        // No visible sessions remain → surface the single most-recent one (s2)
+        // instead of stranding the panel on "No session selected".
+        let sessions = list_workspace_sessions_with_connection(&conn, "w1").unwrap();
+        assert_eq!(
+            sessions.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["s2"],
+        );
+    }
+
+    #[test]
+    fn list_workspace_sessions_returns_all_visible_when_none_hidden() {
+        let (conn, _dir) = test_db();
+        seed_two_sessions(&conn);
+
+        let sessions = list_workspace_sessions_with_connection(&conn, "w1").unwrap();
+        assert_eq!(
+            sessions.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["s1", "s2"],
+        );
     }
 
     fn get_active_session_id(conn: &Connection, workspace_id: &str) -> Option<String> {

@@ -273,37 +273,44 @@ function handleUiMutation(
 				queryKey: grexQueryKeys.slackWorkspaces,
 			});
 			return;
-		case "linearConnectionChanged":
-			void queryClient.invalidateQueries({
-				queryKey: grexQueryKeys.linearConnection,
-			});
-			// Connect/disconnect flips whether the feed has data — kill every
-			// `linearInbox` / `linearSearch` query in one sweep.
+		case "issueConnectionChanged": {
+			// Connect/disconnect/scope changes flip what the feed shows — bust
+			// the affected provider's connection list + every inbox/search query.
+			const { provider } = event;
+			const connectionsKey = `${provider}Connections`;
+			const inboxKey = `${provider}Inbox`;
+			const searchKey = `${provider}Search`;
 			void queryClient.invalidateQueries({
 				predicate: (query) =>
-					query.queryKey[0] === "linearInbox" ||
-					query.queryKey[0] === "linearSearch",
+					query.queryKey[0] === connectionsKey ||
+					query.queryKey[0] === inboxKey ||
+					query.queryKey[0] === searchKey,
 			});
 			return;
-		case "triageConfigChanged":
-			void queryClient.invalidateQueries({
-				queryKey: grexQueryKeys.triageConfig,
-			});
-			return;
-		case "triageActiveStatusChanged":
-			void queryClient.invalidateQueries({
-				queryKey: grexQueryKeys.triageActiveStatus,
-			});
-			return;
-		case "triageWorkspaceCreated":
-			requestSidebarReconcile(queryClient);
-			void queryClient.invalidateQueries({
-				queryKey: grexQueryKeys.triageActiveStatus,
-			});
-			return;
+		}
 		case "pairedDevicesChanged":
 			void queryClient.invalidateQueries({
 				queryKey: grexQueryKeys.pairedDevices,
+			});
+			return;
+		case "automationsChanged":
+			void queryClient.invalidateQueries({
+				queryKey: grexQueryKeys.automations,
+			});
+			return;
+		case "libraryPromptsChanged":
+			void queryClient.invalidateQueries({
+				queryKey: grexQueryKeys.libraryPrompts,
+			});
+			return;
+		case "libraryMcpServersChanged":
+			void queryClient.invalidateQueries({
+				queryKey: grexQueryKeys.libraryMcpServers,
+			});
+			return;
+		case "librarySkillsChanged":
+			void queryClient.invalidateQueries({
+				queryKey: grexQueryKeys.librarySkills,
 			});
 			return;
 		case "terminalSessionIdle":

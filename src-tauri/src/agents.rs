@@ -38,7 +38,7 @@ pub use self::streaming::{
     abort_all_active_streams_blocking, bridge_aborted_event, bridge_done_event, bridge_error_event,
     bridge_permission_request_event, bridge_user_input_request_event, build_send_message_params,
     lookup_workspace_linked_directories, ActiveStreamSummary, ActiveStreams,
-    BuildSendMessageParamsInput, SessionStreamHub,
+    BuildSendMessageParamsInput, SessionStreamHub, SESSION_BUSY_MARKER,
 };
 
 use self::persistence::{
@@ -201,6 +201,13 @@ pub struct AgentSendRequest {
     /// text — this never alters the wire payload.
     #[serde(default)]
     pub pasted_texts: Option<Vec<crate::pipeline::types::PastedTextRange>>,
+    /// Who initiated this turn. `None` = the user (frontend/CLI never set
+    /// it); `Some("automation")` = the automations scheduler. Persisted into
+    /// the `user_prompt` payload so the chat renders a "Sent via automation"
+    /// badge, and background turns skip the mark-read / active-session
+    /// side effects a human send performs.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[cfg(test)]
@@ -212,6 +219,11 @@ pub(crate) struct ExchangeContext {
     pub(crate) model_id: String,
     pub(crate) model_provider: String,
     pub(crate) user_message_id: String,
+    /// True for scheduler-initiated turns (`request.source` set). Finalize
+    /// then skips marking the session read and stealing the workspace's
+    /// active session — a background run must surface as unread, not
+    /// rearrange the user's UI.
+    pub(crate) is_background: bool,
 }
 
 #[tauri::command]
@@ -261,36 +273,13 @@ pub async fn list_opencode_models(
 pub async fn send_agent_message_stream(
     app: AppHandle,
     sidecar: tauri::State<'_, crate::sidecar::ManagedSidecar>,
-    mut request: AgentSendRequest,
+    request: AgentSendRequest,
     on_event: Channel<AgentStreamEvent>,
 ) -> CmdResult<()> {
     let prompt = request.prompt.trim().to_string();
     if prompt.is_empty() {
         return Err(anyhow::anyhow!("Prompt cannot be empty.").into());
     }
-
-    // Inject triage priming as a hidden prefix; consumed flag flips only after sidecar accepts.
-    let priming_session_to_consume: Option<String> = match request.grex_session_id.as_deref() {
-        Some(session_id) => match crate::triage::load_priming_prefix_for_session(session_id) {
-            Ok(Some(priming_prefix)) => {
-                request.prompt_prefix = crate::triage::combine_prefixes(
-                    Some(priming_prefix),
-                    request.prompt_prefix.take(),
-                );
-                Some(session_id.to_string())
-            }
-            Ok(None) => None,
-            Err(error) => {
-                tracing::warn!(
-                    error = %format!("{error:#}"),
-                    session_id,
-                    "triage: load_priming_prefix_for_session failed"
-                );
-                None
-            }
-        },
-        None => None,
-    };
 
     let model = resolve_model(&request.model_id, Some(request.provider.as_str()));
 
@@ -307,7 +296,7 @@ pub async fn send_agent_message_stream(
     let stream_id = Uuid::new_v4().to_string();
     let active_streams = app.state::<ActiveStreams>();
 
-    let send_result = stream_via_sidecar(
+    stream_via_sidecar(
         app.clone(),
         on_event,
         &sidecar,
@@ -317,38 +306,53 @@ pub async fn send_agent_message_stream(
         &prompt,
         &request,
         &working_directory,
-    );
-
-    // Mark consumed only after the prompt actually streamed; retries should keep the priming.
-    if send_result.is_ok() {
-        if let Some(session_id) = priming_session_to_consume {
-            match crate::triage::mark_consumed_for_session(&session_id) {
-                Ok(true) => {
-                    // Publish so the sidebar repaints the kind flip immediately.
-                    crate::ui_sync::publish(
-                        &app,
-                        crate::ui_sync::UiMutationEvent::WorkspaceListChanged,
-                    );
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    tracing::warn!(
-                        error = %format!("{error:#}"),
-                        session_id,
-                        "triage: failed to mark priming consumed; injection will recur"
-                    );
-                }
-            }
-        }
-    }
-
-    send_result
+    )
 }
 
 fn resolve_stream_working_directory(
     request: &AgentSendRequest,
 ) -> anyhow::Result<std::path::PathBuf> {
     resolve_working_directory(request.working_directory.as_deref())
+}
+
+/// Start an agent turn with no owning IPC channel — used by the automations
+/// scheduler. Like `send_agent_message_stream`: persistence,
+/// ActiveStreams busy-locking, and watcher fan-out
+/// (`SessionStreamHub`) all run as for a frontend-initiated send, so an open
+/// conversation still streams the turn live. The no-op channel only drops the
+/// initiator-facing copy nobody is listening to.
+pub(crate) fn start_background_turn(app: &AppHandle, request: AgentSendRequest) -> CmdResult<()> {
+    let prompt = request.prompt.trim().to_string();
+    if prompt.is_empty() {
+        return Err(anyhow::anyhow!("Prompt cannot be empty.").into());
+    }
+
+    let model = resolve_model(&request.model_id, Some(request.provider.as_str()));
+    if request.provider != model.provider {
+        return Err(anyhow::anyhow!(
+            "Model {} does not belong to provider {}.",
+            request.model_id,
+            request.provider
+        )
+        .into());
+    }
+
+    let working_directory = resolve_stream_working_directory(&request)?;
+    let stream_id = Uuid::new_v4().to_string();
+    let sidecar = app.state::<crate::sidecar::ManagedSidecar>();
+    let active_streams = app.state::<ActiveStreams>();
+
+    stream_via_sidecar(
+        app.clone(),
+        Channel::new(|_| Ok(())),
+        &sidecar,
+        &active_streams,
+        &stream_id,
+        &model,
+        &prompt,
+        &request,
+        &working_directory,
+    )
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -918,10 +922,11 @@ mod tests {
             model_id: "opus-1m".to_string(),
             model_provider: "claude".to_string(),
             user_message_id: Uuid::new_v4().to_string(),
+            is_background: false,
         };
 
         // 1. Persist user message
-        persist_user_message(&conn, &ctx, "Hello", &[], &[], &[]).unwrap();
+        persist_user_message(&conn, &ctx, "Hello", &[], &[], None, &[]).unwrap();
 
         persist_result_and_finalize(
             &conn,
@@ -991,9 +996,10 @@ mod tests {
             model_id: "opus-1m".to_string(),
             model_provider: "claude".to_string(),
             user_message_id: Uuid::new_v4().to_string(),
+            is_background: false,
         };
 
-        persist_user_message(&conn, &ctx, "Hi", &[], &[], &[]).unwrap();
+        persist_user_message(&conn, &ctx, "Hi", &[], &[], None, &[]).unwrap();
         persist_result_and_finalize(
             &conn,
             &ctx,
@@ -1049,10 +1055,11 @@ mod tests {
             model_id: "opus-1m".to_string(),
             model_provider: "claude".to_string(),
             user_message_id: Uuid::new_v4().to_string(),
+            is_background: false,
         };
 
         // Persist user message
-        persist_user_message(&conn, &ctx, "Do something", &[], &[], &[]).unwrap();
+        persist_user_message(&conn, &ctx, "Do something", &[], &[], None, &[]).unwrap();
 
         // Persist two intermediate turns
         let turn1 = CollectedTurn {
@@ -1120,10 +1127,11 @@ mod tests {
             model_id: "opus-1m".to_string(),
             model_provider: "claude".to_string(),
             user_message_id: "user-initial".to_string(),
+            is_background: false,
         };
 
         // 1. Initial prompt persisted via the normal path.
-        persist_user_message(&conn, &ctx, "investigate the bug", &[], &[], &[]).unwrap();
+        persist_user_message(&conn, &ctx, "investigate the bug", &[], &[], None, &[]).unwrap();
 
         // 2. Drive the accumulator the same way the streaming loop does:
         //    assistant deltas, steer event, more assistant deltas, result.

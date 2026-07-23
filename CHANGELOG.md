@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.9.2
+
+### Patch Changes
+
+- [#51](https://github.com/emretheus/grex/pull/51) [`eb71eae`](https://github.com/emretheus/grex/commit/eb71eaeaac2fa759e8aacf37eb503c94027ca8f2) Thanks [@emretheus](https://github.com/emretheus)! - Add internationalization (i18n) support with a Language setting. The app ships with English, Chinese, Spanish, German, French, and Japanese, switchable live from Settings → Appearance and persisted across restarts.
+
+  - Built on react-i18next with auto-loaded per-language catalogs, locale-aware persistence (flash-free first paint), and a `bun run i18n:extract` workflow.
+  - Translates essentially the entire desktop UI: the navigation sidebar, message composer, conversation thread (including live streaming summaries), commit button, inspector, the full Settings UI and AI-provider panels, onboarding, the inbox and issue-tracker integrations (Jira/Linear/Trello/Forgejo/Featurebase), the file editor, prompt/skills/MCP library, source-detail views, keyboard-shortcut settings, automations, feedback, shared components, and assorted smaller surfaces (quick panel, quick switch, workspace start, updater, announcements, terminal).
+  - Any not-yet-translated string falls back to English. Backend/sidecar-originated error strings remain English for now and are planned for a follow-up that maps them to machine-readable error codes.
+
+## 0.9.1
+
+### Patch Changes
+
+- [#47](https://github.com/emretheus/grex/pull/47) [`0b90441`](https://github.com/emretheus/grex/commit/0b9044131ea97f5e11a24627a7910f883870f7d4) Thanks [@emretheus](https://github.com/emretheus)! - Add scheduled automations — recurring prompts that run on their own.
+
+  - Schedule a prompt to run hourly, daily, weekly, or on a custom interval, either into an existing chat or as a fresh session in a workspace. Manage them from the new Automations surface (clock icon at the bottom of the sidebar) or the `grex automation` CLI.
+  - Automation-initiated turns stream like a normal send but never steal the active session or focus, and render a "Sent via automation" badge in the chat.
+
+## 0.9.0
+
+### Minor Changes
+
+- [#44](https://github.com/emretheus/grex/pull/44) [`91118ca`](https://github.com/emretheus/grex/commit/91118caed94a872a6c6edbb2a77014cccd2479b2) Thanks [@emretheus](https://github.com/emretheus)! - Add a file-explorer sidebar to the editor for browsing the whole codebase.
+
+  - Toggle a left-hand file tree from the editor header to browse the workspace's folder structure and click any file open in the Monaco editor.
+  - A "Browse files" button in the Changes panel opens the explorer directly — so you can browse and open files even on a branch with no changes yet, without needing a file to click first.
+  - The tree loads one folder level at a time (lazily, cached per folder) and hides noise like `.git`, `node_modules`, and build output, so it stays fast on large repos.
+  - IDE-grade touches: per-extension file icons, git-status badges (M/A/D) on changed files with a dot on folders that contain changes, and the tree auto-reveals + scrolls to the file you open.
+  - Right-click any file or folder to copy its path, reveal it in Finder, open it in an external editor, or add a file to the chat composer as agent context.
+  - The sidebar is drag-resizable and toggles with `Cmd/Ctrl+Shift+E`; its width, open state, and expanded folders persist across sessions.
+  - Editor quick wins: right-click tabs (close / close others / close all, copy path, reveal in Finder, open externally, add to chat), an "Add file to chat" button, and a View menu to toggle word wrap, minimap, sticky scroll, render-whitespace, and side-by-side diff (persisted). Plus go-to-line and clickable breadcrumb segments that reveal the file in the explorer.
+
+## 0.8.0
+
+### Minor Changes
+
+- [#42](https://github.com/emretheus/grex/pull/42) [`1d52589`](https://github.com/emretheus/grex/commit/1d5258968b86499890e5a0e637820b6c32372dcd) Thanks [@emretheus](https://github.com/emretheus)! - Add Forgejo, Featurebase, and Plain as Contexts sources alongside Linear, Jira, and Trello.
+
+  - Connect Forgejo (or any Gitea-compatible instance) with an instance URL and access token to browse, search, and open issues, scope the feed to issues assigned to you or every accessible repo, and append them to the composer.
+  - Connect Featurebase with an API key and your public feedback URL to browse, search, and open feedback posts with their board and upvote counts.
+  - Connect Plain with an API key to browse, search, and open open support threads with their customer and priority.
+
+## 0.7.0
+
+### Minor Changes
+
+- [#40](https://github.com/emretheus/grex/pull/40) [`90462eb`](https://github.com/emretheus/grex/commit/90462eb4bc6d7890bfd1abf43a8606931b072aa3) Thanks [@emretheus](https://github.com/emretheus)! - Add Jira and Trello as Contexts sources alongside Linear.
+
+  - Connect Jira with a site URL, email, and API token to browse, search, and open issues, scope the feed to assigned issues or chosen projects, and append them to the composer.
+  - Connect Trello with an API key and token to browse, search, and open cards, scoped to your cards or chosen boards.
+
+## 0.6.0
+
+### Minor Changes
+
+- [#38](https://github.com/emretheus/grex/pull/38) [`87b5c65`](https://github.com/emretheus/grex/commit/87b5c65a85c5dadd46277943d0ba795c8c71e78b) Thanks [@emretheus](https://github.com/emretheus)! - Add a Library for managing reusable Prompts, Skills, and MCP servers across agents from one place.
+
+  - Prompts: save reusable instructions and insert them into any conversation with `/prompt`.
+  - MCP Servers: configure a server once — custom or from a recommended catalog — test its connection in place, and sync it to Claude Code and Codex's native configs with a preview of exactly what changes.
+  - Skills: see installed skills and browse a recommended catalog to install (fetches the real upstream `SKILL.md` and links it into your agents), or author your own.
+
+## 0.5.1
+
+### Patch Changes
+
+- [#35](https://github.com/emretheus/grex/pull/35) [`469689a`](https://github.com/emretheus/grex/commit/469689a558d365b34377300aae13139ff8a8a64b) Thanks [@emretheus](https://github.com/emretheus)! - Linear context source now supports per-workspace feed scope and multiple connected workspaces.
+
+  - Each connected Linear workspace can show **Assigned to me** (default) or **All issues**, with optional team and project filters when showing all, configurable in Settings → Contexts → Linear.
+  - Connect more than one Linear workspace (org); the inbox feed merges issues across every connection and labels them by workspace when more than one is connected.
+
 ## 0.5.0
 
 ### Minor Changes

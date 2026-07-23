@@ -21,5 +21,10 @@ export type ContextProviderTab =
 	| "github"
 	| "gitlab"
 	| "linear"
+	| "jira"
+	| "trello"
+	| "forgejo"
+	| "featurebase"
+	| "plain"
 	| "slack"
 	| "mobile";
