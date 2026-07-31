@@ -270,7 +270,7 @@ fn official_claude_section() -> AgentModelSection {
         options: vec![
             // Fable 5 leads the list as the most capable pick, but it burns
             // limits ~2x faster than Opus — `useEnsureDefaultModel` therefore
-            // pins the app default to the Opus 4.8 entry below, NOT
+            // pins the app default to the Opus 5 entry below, NOT
             // to options[0]. No fast mode (Opus 4.6+ only).
             claude_model(
                 "claude-fable-5[1m]",
@@ -279,13 +279,21 @@ fn official_claude_section() -> AgentModelSection {
                 false,
             ),
             // App default selection (see `useEnsureDefaultModel`, which pins
-            // this id). Pinned to the explicit `claude-opus-4-8[1m]` wire id —
+            // this id). Pinned to the explicit `claude-opus-5[1m]` wire id —
             // the `[1m]` suffix selects the 1M-context variant, matching the
             // label. We do NOT use the CLI's `default` sentinel: it resolves to
             // whatever the bundled claude-code decides (non-deterministic
             // across CLI bumps), whereas a pinned id is stable. Bump when a
             // newer Opus ships. MUST stay in sync with
             // `sidecar/src/model-catalog.ts`.
+            claude_model(
+                "claude-opus-5[1m]",
+                "Opus 5 1M",
+                &["low", "medium", "high", "xhigh", "max"],
+                true,
+            ),
+            // Explicit 4.8 pin — previously the app default, now selectable
+            // beneath Opus 5.
             claude_model(
                 "claude-opus-4-8[1m]",
                 "Opus 4.8 1M",
@@ -317,6 +325,12 @@ fn codex_section() -> AgentModelSection {
         label: "Codex".to_string(),
         status: AgentModelSectionStatus::Ready,
         options: vec![
+            // Latest OpenAI generation (codenames Luna / Sol / Terra), above
+            // the GPT-5.x lineage. gpt-prefixed ids so `resolve_model` routes
+            // them to codex. MUST stay in sync with `sidecar/src/model-catalog.ts`.
+            codex_model("gpt-luna", "GPT-Luna"),
+            codex_model("gpt-sol", "GPT-Sol"),
+            codex_model("gpt-terra", "GPT-Terra"),
             codex_model("gpt-5.5", "GPT-5.5"),
             codex_model("gpt-5.4", "GPT-5.4"),
             codex_model("gpt-5.4-mini", "GPT-5.4-Mini"),
@@ -1119,6 +1133,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "claude-fable-5[1m]",
+                "claude-opus-5[1m]",
                 "claude-opus-4-8[1m]",
                 "claude-opus-4-7[1m]",
                 "claude-opus-4-6[1m]",
@@ -1139,7 +1154,14 @@ mod tests {
                 .iter()
                 .map(|model| model.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["gpt-5.5", "gpt-5.4", "gpt-5.4-mini",]
+            vec![
+                "gpt-luna",
+                "gpt-sol",
+                "gpt-terra",
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+            ]
         );
         assert!(sections[1]
             .options
@@ -1199,6 +1221,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "claude-fable-5[1m]",
+                "claude-opus-5[1m]",
                 "claude-opus-4-8[1m]",
                 "claude-opus-4-7[1m]",
                 "claude-opus-4-6[1m]",
@@ -1208,14 +1231,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            sections[0].options[6].provider_key.as_deref(),
+            sections[0].options[7].provider_key.as_deref(),
             Some("minimax")
         );
         assert_eq!(
-            sections[0].options[6].effort_levels,
+            sections[0].options[7].effort_levels,
             vec!["low", "medium", "high", "xhigh", "max"]
         );
-        assert!(!sections[0].options[6].supports_context_usage);
+        assert!(!sections[0].options[7].supports_context_usage);
         assert_eq!(sections[1].id, "codex");
     }
 
@@ -1228,6 +1251,27 @@ mod tests {
         assert_eq!(m.cli_model, "claude-opus-4-8[1m]");
         assert_eq!(m.id, "claude-opus-4-8[1m]");
         assert!(m.supports_effort);
+    }
+
+    #[test]
+    fn resolve_opus_5_model() {
+        let _env = crate::testkit::TestEnv::new("resolve-opus-5-model");
+        // The new pinned app default resolves to itself under claude.
+        let m = resolve_model("claude-opus-5[1m]", None);
+        assert_eq!(m.provider, "claude");
+        assert_eq!(m.cli_model, "claude-opus-5[1m]");
+        assert_eq!(m.id, "claude-opus-5[1m]");
+    }
+
+    #[test]
+    fn resolve_gpt_luna_sol_terra_route_to_codex() {
+        let _env = crate::testkit::TestEnv::new("resolve-gpt-luna-sol-terra-routes-to-codex");
+        // gpt-prefixed OpenAI codenames route to the Codex provider.
+        for id in ["gpt-luna", "gpt-sol", "gpt-terra"] {
+            let m = resolve_model(id, None);
+            assert_eq!(m.provider, "codex");
+            assert_eq!(m.cli_model, id);
+        }
     }
 
     #[test]
@@ -1491,20 +1535,22 @@ mod tests {
         let sections = model_sections_for_inputs(Vec::new(), None, None, None);
         let claude = sections.iter().find(|s| s.id == "claude").unwrap();
         let ids: Vec<&str> = claude.options.iter().map(|o| o.id.as_str()).collect();
-        // User-facing ordering: Fable 5 on top, then 4.8 (default), 4.7, 4.6.
+        // User-facing ordering: Fable 5 on top, then Opus 5 (default), 4.8,
+        // 4.7, 4.6.
         assert_eq!(
-            &ids[..4],
+            &ids[..5],
             &[
                 "claude-fable-5[1m]",
+                "claude-opus-5[1m]",
                 "claude-opus-4-8[1m]",
                 "claude-opus-4-7[1m]",
                 "claude-opus-4-6[1m]"
             ],
-            "Fable 5 must lead, with Opus 4.8 (default) / 4.7 / 4.6 beneath it"
+            "Fable 5 must lead, with Opus 5 (default) / 4.8 / 4.7 / 4.6 beneath it"
         );
 
         // Fable 5: most capable, leads the list, but is NOT the app default
-        // (too expensive) — `useEnsureDefaultModel` pins to the Opus 4.8 id.
+        // (too expensive) — `useEnsureDefaultModel` pins to the Opus 5 id.
         // No fast mode (Opus 4.6+ only); full effort tiers incl. xhigh.
         let fable = &claude.options[0];
         assert_eq!(fable.label, "Fable 5 1M");
@@ -1515,19 +1561,30 @@ mod tests {
             vec!["low", "medium", "high", "xhigh", "max"]
         );
 
-        // Opus 4.8: the app default selection, supports fast mode, and keeps
+        // Opus 5: the app default selection, supports fast mode, and keeps
         // the xhigh effort tier. Pinned to its explicit `[1m]` wire id.
         let default = &claude.options[1];
-        assert_eq!(default.label, "Opus 4.8 1M");
-        assert_eq!(default.cli_model, "claude-opus-4-8[1m]");
-        assert!(default.supports_fast_mode, "Opus 4.8 supports fast mode");
+        assert_eq!(default.label, "Opus 5 1M");
+        assert_eq!(default.cli_model, "claude-opus-5[1m]");
+        assert!(default.supports_fast_mode, "Opus 5 supports fast mode");
         assert_eq!(
             default.effort_levels,
             vec!["low", "medium", "high", "xhigh", "max"]
         );
 
+        // Opus 4.8: previously the default, now selectable beneath Opus 5;
+        // still supports fast mode and the xhigh tier.
+        let opus48 = &claude.options[2];
+        assert_eq!(opus48.label, "Opus 4.8 1M");
+        assert_eq!(opus48.cli_model, "claude-opus-4-8[1m]");
+        assert!(opus48.supports_fast_mode, "Opus 4.8 supports fast mode");
+        assert_eq!(
+            opus48.effort_levels,
+            vec!["low", "medium", "high", "xhigh", "max"]
+        );
+
         // Explicit 4.7 pin: same effort tiers as before, still no fast mode.
-        let opus47 = &claude.options[2];
+        let opus47 = &claude.options[3];
         assert_eq!(opus47.label, "Opus 4.7 1M");
         assert_eq!(opus47.cli_model, "claude-opus-4-7[1m]");
         assert!(!opus47.supports_fast_mode);
@@ -1537,7 +1594,7 @@ mod tests {
         );
 
         // 4.6 unchanged.
-        let opus46 = &claude.options[3];
+        let opus46 = &claude.options[4];
         assert_eq!(opus46.label, "Opus 4.6 1M");
         assert!(opus46.supports_fast_mode);
     }
