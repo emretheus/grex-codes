@@ -164,7 +164,7 @@ pub fn send_message(
         },
     };
 
-    // 3. Resolve model — param > session row > app default (Opus 4.8 1M).
+    // 3. Resolve model — param > session row > app default (Opus 5 1M).
     //    Provider hint is required so cursor's `default` doesn't infer to
     //    claude.
     let (session_model, session_provider) =
@@ -175,7 +175,7 @@ pub fn send_message(
         .as_deref()
         .map(str::to_string)
         .or(session_model)
-        .unwrap_or_else(|| "claude-opus-4-8[1m]".to_string());
+        .unwrap_or_else(|| "claude-opus-5[1m]".to_string());
     let provider_hint = session_provider.as_deref();
     let model = crate::agents::resolve_model(&model_id, provider_hint);
 

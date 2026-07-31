@@ -168,9 +168,49 @@ describe("useEnsureDefaultModel", () => {
 		});
 	});
 
-	it("pins the repaired default to the Opus 4.8 1M entry, not the first option", () => {
+	it("pins the repaired default to the Opus 5 1M entry, not the first option", () => {
 		// Fable 5 leads the picker but is too expensive to be the app
-		// default — the repair must skip it and land on Opus 4.8 1M.
+		// default — the repair must skip it and land on Opus 5 1M.
+		const { updateSettings } = renderUseEnsureDefaultModel({
+			defaultModelId: null,
+			sections: [
+				{
+					id: "claude",
+					label: "Claude Code",
+					status: "ready",
+					options: [
+						{
+							id: "claude-fable-5[1m]",
+							provider: "claude",
+							label: "Fable 5 1M",
+							cliModel: "claude-fable-5[1m]",
+						},
+						{
+							id: "claude-opus-5[1m]",
+							provider: "claude",
+							label: "Opus 5 1M",
+							cliModel: "claude-opus-5[1m]",
+						},
+						{
+							id: "claude-opus-4-8[1m]",
+							provider: "claude",
+							label: "Opus 4.8 1M",
+							cliModel: "claude-opus-4-8[1m]",
+						},
+					],
+				},
+				{ id: "codex", label: "Codex", status: "unavailable", options: [] },
+			],
+		});
+
+		expect(updateSettings).toHaveBeenCalledWith(
+			expect.objectContaining({ defaultModelId: "claude-opus-5[1m]" }),
+		);
+	});
+
+	it("falls back to Opus 4.8 1M when Opus 5 is absent from the catalog", () => {
+		// Older catalogs that predate Opus 5 must still skip Fable 5 and pin
+		// the default to Opus 4.8 1M.
 		const { updateSettings } = renderUseEnsureDefaultModel({
 			defaultModelId: null,
 			sections: [

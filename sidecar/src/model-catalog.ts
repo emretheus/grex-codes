@@ -11,7 +11,7 @@ const MODEL_CATALOG: Record<Provider, readonly ProviderModelInfo[]> = {
 	claude: [
 		// Fable 5 leads the list as the most capable pick, but it burns limits
 		// ~2x faster than Opus — `useEnsureDefaultModel` pins the app default
-		// to the Opus 4.8 entry below, NOT to the first entry. No fast
+		// to the Opus 5 entry below, NOT to the first entry. No fast
 		// mode (Opus 4.6+ only).
 		{
 			id: "claude-fable-5[1m]",
@@ -20,12 +20,22 @@ const MODEL_CATALOG: Record<Provider, readonly ProviderModelInfo[]> = {
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
 		// App default selection (see `useEnsureDefaultModel`, which pins this
-		// id). Pinned to the explicit `claude-opus-4-8[1m]` wire id — the `[1m]`
+		// id). Pinned to the explicit `claude-opus-5[1m]` wire id — the `[1m]`
 		// suffix selects the 1M-context variant, matching the label. We do NOT
 		// use the CLI's `default` sentinel: it resolves to whatever the bundled
 		// claude-code decides is "default" (non-deterministic across CLI bumps),
 		// whereas a pinned id is stable. Bump when a newer Opus ships. MUST stay
 		// in sync with the Rust catalog (`official_claude_section`).
+		{
+			id: "claude-opus-5[1m]",
+			label: "Opus 5 1M",
+			cliModel: "claude-opus-5[1m]",
+			effortLevels: ["low", "medium", "high", "xhigh", "max"],
+			supportsFastMode: true,
+		},
+		// Explicit 4.8 pin — previously this slot WAS the app default; now that
+		// the default advanced to Opus 5 we surface 4.8 as its own entry so
+		// users can still select it.
 		{
 			id: "claude-opus-4-8[1m]",
 			label: "Opus 4.8 1M",
@@ -33,9 +43,7 @@ const MODEL_CATALOG: Record<Provider, readonly ProviderModelInfo[]> = {
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			supportsFastMode: true,
 		},
-		// Explicit 4.7 pin — previously this slot WAS `default`; now that
-		// `default` advanced to 4.8 we surface 4.7 as its own entry so users
-		// can still select it.
+		// Explicit 4.7 pin.
 		{
 			id: "claude-opus-4-7[1m]",
 			label: "Opus 4.7 1M",
@@ -63,6 +71,31 @@ const MODEL_CATALOG: Record<Provider, readonly ProviderModelInfo[]> = {
 		},
 	],
 	codex: [
+		// Latest OpenAI generation (codenames Luna / Sol / Terra), surfaced
+		// above the GPT-5.x lineage. gpt-prefixed ids so `resolve_model` routes
+		// them to the Codex provider automatically. MUST stay in sync with the
+		// Rust catalog (`codex_section`).
+		{
+			id: "gpt-luna",
+			label: "GPT-Luna",
+			cliModel: "gpt-luna",
+			effortLevels: CODEX_EFFORT_LEVELS,
+			supportsFastMode: true,
+		},
+		{
+			id: "gpt-sol",
+			label: "GPT-Sol",
+			cliModel: "gpt-sol",
+			effortLevels: CODEX_EFFORT_LEVELS,
+			supportsFastMode: true,
+		},
+		{
+			id: "gpt-terra",
+			label: "GPT-Terra",
+			cliModel: "gpt-terra",
+			effortLevels: CODEX_EFFORT_LEVELS,
+			supportsFastMode: true,
+		},
 		{
 			id: "gpt-5.5",
 			label: "GPT-5.5",
